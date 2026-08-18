@@ -23,6 +23,7 @@ being the maximizer of an explicit functional.
 Reference: K. L. Clarkson, "More output-sensitive geometric algorithms" (1994).
 """
 
+import time
 import warnings
 from fractions import Fraction
 
@@ -31,6 +32,9 @@ import highspy
 from scipy.optimize import linprog
 
 _INF = highspy.kHighsInf
+
+#: Wall-time breakdown of the most recent extremal_rays() call, in seconds.
+LAST_PROFILE = {}
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +255,15 @@ def extremal_rays(
     Returns a sorted integer array of indices into R (first occurrence for
     duplicated directions). The corresponding rows are the extremal rays.
     """
+    prof = {k: 0.0 for k in (
+        "preprocess", "positive_functional", "seeding",
+        "main_separation_lp", "main_ray_shoot", "main_other",
+        "cleanup_separation_lp", "cleanup_membership_lp", "total",
+    )}
+    prof["n_lp_main"] = prof["n_lp_cleanup"] = prof["n_shoot"] = 0
+    t_total = time.perf_counter()
+
+    t0 = time.perf_counter()
     R_in = np.asarray(R)
     if R_in.ndim != 2 or R_in.shape[0] == 0:
         raise ValueError("R must be a non-empty 2d array of rays")
@@ -260,9 +273,12 @@ def extremal_rays(
         return rep.copy()
 
     R_int = _as_integer(R_in)
+    prof["preprocess"] = time.perf_counter() - t0
 
+    t0 = time.perf_counter()
     w = positive_functional(U)
     P = U / (U @ w)[:, None]
+    prof["positive_functional"] = time.perf_counter() - t0
 
     # status: 0 unknown, 1 confirmed extremal, -1 confirmed redundant
     status = np.zeros(n, dtype=np.int8)
@@ -277,6 +293,7 @@ def extremal_rays(
     # --- seeding: argmaxes of random functionals are vertices; no LPs needed
     if seed_shots == "auto":
         seed_shots = min(2 * d, n)
+    t0 = time.perf_counter()
     if seed_shots:
         rng = np.random.default_rng(rng_seed)
         C = rng.standard_normal((d, seed_shots))
@@ -288,20 +305,28 @@ def extremal_rays(
             confirm(j)
         if verbose:
             print(f"seeding: {len(E)} extremal rays from {seed_shots} shots")
+    prof["seeding"] = time.perf_counter() - t0
 
     # --- main loop
     n_lp = 0
+    t_main = time.perf_counter()
     for i in range(n):
         if status[i] != 0:
             continue
         for _ in range(n + 1):
+            t0 = time.perf_counter()
             val, c = oracle.separate(P[i])
+            prof["main_separation_lp"] += time.perf_counter() - t0
             n_lp += 1
+            prof["n_lp_main"] += 1
             scale = max(1.0, float(np.abs(P[i]).max()))
             if val <= tol * scale:
                 status[i] = -1
                 break
+            t0 = time.perf_counter()
             j = _shoot(P, c, np.flatnonzero(status == 0))
+            prof["main_ray_shoot"] += time.perf_counter() - t0
+            prof["n_shoot"] += 1
             confirm(j)
             if j == i:
                 break
@@ -310,6 +335,11 @@ def extremal_rays(
         if verbose and (i + 1) % 500 == 0:
             print(f"  {i + 1}/{n} candidates, |E| = {len(E)}, LPs = {n_lp}")
 
+    prof["main_other"] = (
+        time.perf_counter() - t_main
+        - prof["main_separation_lp"] - prof["main_ray_shoot"]
+    )
+
     # --- cleanup: restore minimality lost to floating-point tie-breaking
     if cleanup:
         for e in sorted(E):
@@ -317,13 +347,17 @@ def extremal_rays(
             if not others:
                 continue
             oracle.relax(e)
+            t0 = time.perf_counter()
             val, _c = oracle.separate(P[e])
+            prof["cleanup_separation_lp"] += time.perf_counter() - t0
             n_lp += 1
+            prof["n_lp_cleanup"] += 1
             scale = max(1.0, float(np.abs(P[e]).max()))
             if val > tol * scale:
                 oracle.restore(e)
                 continue
             # not separable: demand a positive certificate of redundancy
+            t0 = time.perf_counter()
             res = linprog(
                 c=np.zeros(len(others)),
                 A_eq=P[others].T,
@@ -335,6 +369,7 @@ def extremal_rays(
                 float(np.abs(P[others].T @ res.x - P[e]).max())
                 if res.success else np.inf
             )
+            prof["cleanup_membership_lp"] += time.perf_counter() - t0
             certified = res.success and resid < 1e-6
             if not certified and R_int is not None and res.success:
                 certified = _exact_membership(
@@ -354,6 +389,9 @@ def extremal_rays(
                     "minimal. Consider verify_extremal_rays()."
                 )
 
+    prof["total"] = time.perf_counter() - t_total
+    LAST_PROFILE.clear()
+    LAST_PROFILE.update(prof)
     if verbose:
         print(f"done: {len(E)} extremal rays, {n_lp} LPs")
     return np.sort(rep[sorted(E)])
