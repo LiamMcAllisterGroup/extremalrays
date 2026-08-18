@@ -1,48 +1,56 @@
-"""Clarkson-style computation of the extremal rays of a pointed polyhedral cone.
+# =============================================================================
+#    Copyright (C) 2026  Nate MacFadden for the Liam McAllister Group
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# =============================================================================
+#
+# -----------------------------------------------------------------------------
+# Description:  This module computes the extremal rays of pointed polyhedral
+#               cones with Clarkson's output-sensitive algorithm. Candidates
+#               are tested against the confirmed-extremal set via small,
+#               always-feasible separation LPs; extremality is established
+#               constructively by ray shooting, never by an infeasibility
+#               proof.
+# -----------------------------------------------------------------------------
+from __future__ import annotations
 
-Given rays R (rows), find the unique minimal subset generating the same cone.
-
-The classical approach tests each ray for redundancy against all n-1 others,
-so proving a ray extremal requires an infeasibility certificate for a large,
-typically degenerate LP -- catastrophically slow in high dimension (LP solvers
-can grind for hours on a single such proof). This module instead tests each
-candidate only against the set E of *confirmed* extremal rays via a small
-separation LP that is always feasible and bounded:
-
-    maximize c.p  subject to  c.e <= 0 for e in E,  -1 <= c <= 1
-
-Optimal value 0 means p is in cone(E) (Farkas), hence redundant. A positive
-value yields a separating functional c, which is used to "ray shoot": the
-(lexicographically tie-broken) maximizer of c.s over the remaining candidates
-is guaranteed extremal and joins E; the candidate is then retested. Every
-failed test permanently grows E, so the total LP count is at most n + s
-(s = number of extremal rays), each LP having at most s rows. Extremality is
-never established through an infeasibility proof -- only constructively, by
-being the maximizer of an explicit functional.
-
-Reference: K. L. Clarkson, "More output-sensitive geometric algorithms" (1994).
-"""
-
+# stdlib imports
 import time
 import warnings
 from fractions import Fraction
 
+# external imports
 import numpy as np
+from numpy.typing import ArrayLike
 import highspy
 from scipy.optimize import linprog
 
 _INF = highspy.kHighsInf
 
-#: Wall-time breakdown of the most recent extremal_rays() call, in seconds.
-LAST_PROFILE = {}
+# wall-time breakdown of the most recent extremal_rays() call, in seconds
+LAST_PROFILE: dict = {}
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # preprocessing
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
-def _as_integer(R):
-    """Return an integer copy of R, or None if R is genuinely non-integral."""
+def _as_integer(R: np.ndarray) -> "np.ndarray | None":
+    """
+    Return an integer copy of ``R``, or None if ``R`` is genuinely
+    non-integral.
+    """
     if np.issubdtype(R.dtype, np.integer):
         return R.astype(np.int64)
     Rr = np.round(R)
@@ -51,12 +59,20 @@ def _as_integer(R):
     return None
 
 
-def _unique_primitive(R):
-    """Reduce rays to unique primitive representatives.
+def _unique_primitive(R: np.ndarray) -> "tuple[np.ndarray, np.ndarray]":
+    """
+    Reduce rays to unique primitive representatives.
 
-    Returns (U, rep) where U are the unique (primitive, for integer input)
-    rays and rep[k] is the index in the original array of the first ray with
-    that direction. Zero rays are dropped.
+    For integer input, each ray is divided by the GCD of its entries (exact);
+    float rays are normalized to unit length instead. Zero rays are dropped.
+
+    Returns
+    -------
+    U : ndarray of shape (n_unique, dim)
+        The unique reduced rays, as floats.
+    rep : ndarray of shape (n_unique,)
+        rep[k] is the index in the original array of the first ray with
+        direction U[k].
     """
     Ri = _as_integer(R)
     if Ri is not None:
@@ -82,14 +98,33 @@ def _unique_primitive(R):
     return prim[keep].astype(float), np.array(rep, dtype=int)
 
 
-def positive_functional(R):
-    """Find w with R @ w >= 1 for every row of R.
-
-    Such a w exists iff cone(R) is pointed (contained in an open halfspace).
-    Raises ValueError otherwise. The returned w defines the affine slice
-    w.x = 1 on which rays are normalized to points.
+def positive_functional(R: ArrayLike) -> np.ndarray:
     """
+    Find w with R @ w >= 1 for every row of R.
+
+    Such a w exists iff cone(R) is pointed (equivalently, contained in an
+    open halfspace). The returned w defines the affine slice w . x = 1 on
+    which rays are normalized to points, turning conic redundancy into
+    point-hull redundancy.
+
+    Parameters
+    ----------
+    R : array-like of shape (n, dim)
+        Matrix whose rows are the rays.
+
+    Returns
+    -------
+    w : ndarray of shape (dim,)
+        A functional strictly positive on every ray.
+
+    Raises
+    ------
+    ValueError
+        If the cone is not pointed (the LP is infeasible).
+    """
+    R = np.asarray(R)
     n, d = R.shape
+    # minimizing sum(R @ w) keeps w tame; any feasible w would do
     res = linprog(
         c=R.sum(axis=0).astype(float),
         A_ub=-R.astype(float),
@@ -111,12 +146,13 @@ def positive_functional(R):
     return w
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # separation oracle: one persistent HiGHS model, warm-started across calls
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 class _SeparationOracle:
-    """Persistent LP  max c.p  s.t.  c.e <= 0 (e in E),  -1 <= c <= 1.
+    """
+    Persistent LP  max c . p  s.t.  c . e <= 0 (e in E),  -1 <= c <= 1.
 
     Rows are added as E grows; only the objective changes between candidate
     tests, so HiGHS warm-starts from the previous basis. Rows can be relaxed
@@ -124,7 +160,7 @@ class _SeparationOracle:
     tests a confirmed ray against the others without rebuilding the model.
     """
 
-    def __init__(self, d):
+    def __init__(self, d: int):
         self.d = d
         self._col_idx = np.arange(d, dtype=np.int32)
         self.h = highspy.Highs()
@@ -132,19 +168,21 @@ class _SeparationOracle:
         self.h.addVars(d, np.full(d, -1.0), np.full(d, 1.0))
         self.row_of = {}
 
-    def add_row(self, e, key):
+    def add_row(self, e: np.ndarray, key: int) -> None:
         nz = np.flatnonzero(e).astype(np.int32)
         self.h.addRow(-_INF, 0.0, len(nz), nz, e[nz].astype(float))
         self.row_of[key] = len(self.row_of)
 
-    def relax(self, key):
+    def relax(self, key: int) -> None:
         self.h.changeRowBounds(self.row_of[key], -_INF, _INF)
 
-    def restore(self, key):
+    def restore(self, key: int) -> None:
         self.h.changeRowBounds(self.row_of[key], -_INF, 0.0)
 
-    def separate(self, p):
-        """Return (val, c) with val = max c.p. val ~ 0 iff p in cone(E).
+    def separate(self, p: np.ndarray) -> "tuple[float, np.ndarray]":
+        """
+        Return ``(val, c)`` with val = max c . p. By Farkas' lemma, val ~ 0
+        iff p is in cone(E); val > 0 gives a separating functional c.
 
         Raises on any non-optimal solver status: a solver failure must never
         be silently interpreted as a verdict.
@@ -159,19 +197,25 @@ class _SeparationOracle:
         return val, c
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # ray shooting
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
-def _shoot(P, c, cand, rel_tol=1e-9):
-    """Lexicographically tie-broken maximizer of P[cand] @ c.
+def _shoot(P: np.ndarray,
+           c: np.ndarray,
+           cand: np.ndarray,
+           rel_tol: float = 1e-9) -> "tuple[int, bool]":
+    """
+    Lexicographically tie-broken maximizer of P[cand] @ c.
 
-    Returns (index from cand, tied). When tied is False the maximizer was
-    unique within tolerance: since the float error of these dot products is
-    orders of magnitude below the tie tolerance, the point is then the true
-    unique maximizer of a linear functional and hence provably a vertex of
-    conv(P) -- no cleanup retest needed. Only tie-broken results (tied=True)
-    can be corrupted by floating point and require the cleanup pass."""
+    Returns ``(index from cand, tied)``. When ``tied`` is False the maximizer
+    was unique within tolerance: since the float error of these dot products
+    is orders of magnitude below the tie tolerance, the point is then the
+    true unique maximizer of a linear functional and hence provably a vertex
+    of conv(P) -- no cleanup retest needed. Only tie-broken results
+    (``tied=True``) can be corrupted by floating point and require the
+    cleanup pass.
+    """
     vals = P[cand] @ c
     atol = rel_tol * max(1.0, float(np.abs(vals).max()))
     T = cand[vals >= vals.max() - atol]
@@ -186,19 +230,25 @@ def _shoot(P, c, cand, rel_tol=1e-9):
     return int(T[0]), tied
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # exact rational fallback (integer rays only)
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
-def _exact_membership(r, A_rows, lam_float, support_tol=1e-9):
-    """One-sided exact certifier: try to confirm r = sum lam_i a_i, lam >= 0,
-    over the rationals, using the support of a float LP solution. Returns
-    True only on a rigorous success; False means inconclusive."""
+def _exact_membership(r: np.ndarray,
+                      A_rows: np.ndarray,
+                      lam_float: np.ndarray,
+                      support_tol: float = 1e-9) -> bool:
+    """
+    One-sided exact certifier: try to confirm r = sum lam_i a_i with
+    lam >= 0, over the rationals, using the support of a float LP solution.
+    Returns True only on a rigorous success; False means inconclusive.
+    """
     supp = np.flatnonzero(lam_float > support_tol)
     if len(supp) == 0:
         return bool(np.all(r == 0))
     d = len(r)
     ncol = len(supp)
+    # Gaussian elimination over Q on [A_supp | r]
     M = [
         [Fraction(int(A_rows[j][k])) for j in supp] + [Fraction(int(r[k]))]
         for k in range(d)
@@ -228,39 +278,68 @@ def _exact_membership(r, A_rows, lam_float, support_tol=1e-9):
     return all(v >= 0 for v in x)
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # main algorithm
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
-def extremal_rays(
-    R,
-    tol=1e-7,
-    seed_shots="auto",
-    cleanup=True,
-    verbose=False,
-    rng_seed=0,
-):
-    """Indices of a minimal generating subset of the rays R of a pointed cone.
+def extremal_rays(R: ArrayLike,
+                  tol: float = 1e-7,
+                  seed_shots: "int | str" = "auto",
+                  cleanup: bool = True,
+                  verbose: bool = False,
+                  rng_seed: int = 0) -> np.ndarray:
+    """
+    Indices of a minimal generating subset of the rays R of a pointed cone.
 
-    Arguments:
-    - R: (n, d) array whose rows generate the cone. Integer input enables
-      exact primitive-vector deduplication and the exact rational fallback in
-      the cleanup pass.
-    - tol: relative threshold on the separation LP value for deciding
-      membership vs. separation.
-    - seed_shots: number of random functionals shot before the main loop to
-      pre-populate E cheaply (each shot is a matvec argmax, no LP). "auto"
-      picks min(2d, n). 0 disables.
-    - cleanup: retest each confirmed ray against the others. Floating-point
-      tie-breaking in ray shooting can rarely admit a redundant ray into E;
-      cleanup restores minimality and should stay on unless a slightly
-      non-minimal generating set is acceptable.
-    - verbose: print progress.
-    - rng_seed: seed for the seeding functionals (results are deterministic
-      for a fixed value).
+    Implements Clarkson's output-sensitive algorithm: each candidate is
+    tested only against the set E of confirmed extremal rays via a small
+    separation LP (always feasible and bounded -- extremality is never
+    established through an infeasibility proof). A positive separation value
+    yields a functional whose tie-broken maximizer over the remaining
+    candidates is provably extremal and joins E; the candidate is then
+    retested. Total LP count is at most n + |E|, each LP having at most |E|
+    rows.
 
-    Returns a sorted integer array of indices into R (first occurrence for
-    duplicated directions). The corresponding rows are the extremal rays.
+    Parameters
+    ----------
+    R : array-like of shape (n, dim)
+        Matrix whose rows generate the cone. Integer input enables exact
+        primitive-vector deduplication and the exact rational fallback in
+        the cleanup pass.
+    tol : float, optional
+        Relative threshold on the separation LP value for deciding
+        membership vs. separation. Defaults to 1e-7.
+    seed_shots : int or "auto", optional
+        Number of random functionals shot before the main loop to
+        pre-populate E cheaply (each shot is a matvec argmax, no LP).
+        "auto" (default) picks min(2 dim, n); 0 disables seeding.
+    cleanup : bool, optional
+        Retest tie-admitted rays against the other confirmed rays.
+        Floating-point tie-breaking in ray shooting can rarely admit a
+        redundant ray into E; cleanup restores minimality and should stay
+        True unless a slightly non-minimal generating set is acceptable.
+        Rays admitted as the unique maximizer of some functional are
+        provably extremal and skip the retest. Defaults to True.
+    verbose : bool, optional
+        Whether to print progress. Defaults to False.
+    rng_seed : int, optional
+        Seed for the seeding functionals (results are deterministic for a
+        fixed value). Defaults to 0.
+
+    Returns
+    -------
+    idx : ndarray of shape (n_extremal,)
+        Sorted indices into R (first occurrence for duplicated directions).
+        The corresponding rows are the extremal rays.
+
+    Raises
+    ------
+    ValueError
+        If the cone is not pointed.
+
+    Notes
+    -----
+    A wall-time breakdown of the call is stored in ``core.LAST_PROFILE``.
     """
     prof = {k: 0.0 for k in (
         "preprocess", "positive_functional", "seeding",
@@ -323,7 +402,7 @@ def extremal_rays(
     for i in range(n):
         if status[i] != 0:
             continue
-        for _ in range(n + 1):
+        for _ in range(n + 1):  # safety bound; each pass grows E or resolves i
             t0 = time.perf_counter()
             val, c = oracle.separate(P[i])
             prof["main_separation_lp"] += time.perf_counter() - t0
@@ -344,7 +423,6 @@ def extremal_rays(
             raise RuntimeError(f"failed to resolve candidate {i}")
         if verbose and (i + 1) % 500 == 0:
             print(f"  {i + 1}/{n} candidates, |E| = {len(E)}, LPs = {n_lp}")
-
     prof["main_other"] = (
         time.perf_counter() - t_main
         - prof["main_separation_lp"] - prof["main_ray_shoot"]

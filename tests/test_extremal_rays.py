@@ -1,7 +1,32 @@
+# =============================================================================
+#    Copyright (C) 2026  Nate MacFadden for the Liam McAllister Group
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# =============================================================================
+#
+# -----------------------------------------------------------------------------
+# Description:  Tests for extremal_rays: known cones, degenerate inputs, tie
+#               stress, and randomized cross-checks against a brute-force
+#               reference implementation.
+# -----------------------------------------------------------------------------
+
+# external imports
 import numpy as np
 import pytest
 from scipy.optimize import linprog
 
+# local imports
 from extremal_rays import extremal_rays, verify_extremal_rays
 
 

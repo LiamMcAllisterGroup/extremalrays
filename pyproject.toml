@@ -1,23 +1,40 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = [
+    "setuptools>=64",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "extremal-rays"
 version = "0.1.0"
 description = "Fast extremal rays of pointed polyhedral cones via Clarkson's output-sensitive algorithm"
+authors = [{ name = "Nate MacFadden for the Liam McAllister Group" }]
 readme = "README.md"
-license = { file = "LICENSE" }
-requires-python = ">=3.9"
-authors = [{ name = "Liam McAllister Group" }]
+license = "GPL-3.0-or-later"
+keywords = ["polyhedral cone", "extremal rays", "redundancy removal", "Clarkson", "linear programming", "Mori cone"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
 dependencies = [
     "numpy",
     "scipy",
     "highspy",
 ]
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = [
+    "pytest",
+]
+
+[project.urls]
+Repository = "https://github.com/LiamMcAllisterGroup/extremal_rays"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py39"

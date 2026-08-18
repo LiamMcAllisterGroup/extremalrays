@@ -1,18 +1,40 @@
-"""Benchmark on the toric Mori cone (in basis) of the h11=491 Calabi-Yau.
+# =============================================================================
+#    Copyright (C) 2026  Nate MacFadden for the Liam McAllister Group
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# =============================================================================
+#
+# -----------------------------------------------------------------------------
+# Description:  Benchmark on the toric Mori cone (in a basis) of the h11=491
+#               Calabi-Yau: 3509 generating rays in 491 dimensions, of which
+#               884 are extremal. The classical per-ray redundancy LP never
+#               terminates on this input (a single infeasibility proof
+#               exceeds 15 minutes in HiGHS); this implementation finishes
+#               in seconds.
+#
+#               Run:  python benchmarks/bench_mori.py [--verify]
+# -----------------------------------------------------------------------------
 
-3509 generating rays in 491 dimensions; 884 are extremal. The classical
-per-ray redundancy LP never terminates on this input (a single infeasibility
-proof exceeds 15 minutes in HiGHS); this implementation finishes in seconds.
-
-Run:  python benchmarks/bench_mori.py [--verify]
-"""
-
+# stdlib imports
 import argparse
 import pathlib
 import time
 
+# external imports
 import numpy as np
 
+# local imports
 from extremal_rays import extremal_rays, verify_extremal_rays
 
 DATA = pathlib.Path(__file__).parent / "data" / "mori_rays_h11_491.npz"
