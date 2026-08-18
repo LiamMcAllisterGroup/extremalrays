@@ -164,11 +164,18 @@ class _SeparationOracle:
 # ---------------------------------------------------------------------------
 
 def _shoot(P, c, cand, rel_tol=1e-9):
-    """Index (from cand) of the lexicographically tie-broken maximizer of
-    P[cand] @ c. In exact arithmetic the result is a vertex of conv(P)."""
+    """Lexicographically tie-broken maximizer of P[cand] @ c.
+
+    Returns (index from cand, tied). When tied is False the maximizer was
+    unique within tolerance: since the float error of these dot products is
+    orders of magnitude below the tie tolerance, the point is then the true
+    unique maximizer of a linear functional and hence provably a vertex of
+    conv(P) -- no cleanup retest needed. Only tie-broken results (tied=True)
+    can be corrupted by floating point and require the cleanup pass."""
     vals = P[cand] @ c
     atol = rel_tol * max(1.0, float(np.abs(vals).max()))
     T = cand[vals >= vals.max() - atol]
+    tied = len(T) > 1
     k = 0
     d = P.shape[1]
     while len(T) > 1 and k < d:
@@ -176,7 +183,7 @@ def _shoot(P, c, cand, rel_tol=1e-9):
         atol_k = rel_tol * max(1.0, float(np.abs(col).max()))
         T = T[col >= col.max() - atol_k]
         k += 1
-    return int(T[0])
+    return int(T[0]), tied
 
 
 # ---------------------------------------------------------------------------
@@ -283,11 +290,13 @@ def extremal_rays(
     # status: 0 unknown, 1 confirmed extremal, -1 confirmed redundant
     status = np.zeros(n, dtype=np.int8)
     E = []
+    suspect = {}  # E member -> admitted only via tie-broken shots
     oracle = _SeparationOracle(d)
 
-    def confirm(j):
+    def confirm(j, tied):
         status[j] = 1
         E.append(j)
+        suspect[j] = tied
         oracle.add_row(P[j], j)
 
     # --- seeding: argmaxes of random functionals are vertices; no LPs needed
@@ -298,11 +307,12 @@ def extremal_rays(
         rng = np.random.default_rng(rng_seed)
         C = rng.standard_normal((d, seed_shots))
         all_idx = np.arange(n)
-        hits = set()
+        hits = {}  # index -> tied on every shot that produced it
         for k in range(seed_shots):
-            hits.add(_shoot(P, C[:, k], all_idx))
+            j, tied = _shoot(P, C[:, k], all_idx)
+            hits[j] = hits.get(j, True) and tied
         for j in sorted(hits):
-            confirm(j)
+            confirm(j, hits[j])
         if verbose:
             print(f"seeding: {len(E)} extremal rays from {seed_shots} shots")
     prof["seeding"] = time.perf_counter() - t0
@@ -324,10 +334,10 @@ def extremal_rays(
                 status[i] = -1
                 break
             t0 = time.perf_counter()
-            j = _shoot(P, c, np.flatnonzero(status == 0))
+            j, tied = _shoot(P, c, np.flatnonzero(status == 0))
             prof["main_ray_shoot"] += time.perf_counter() - t0
             prof["n_shoot"] += 1
-            confirm(j)
+            confirm(j, tied)
             if j == i:
                 break
         else:
@@ -340,9 +350,15 @@ def extremal_rays(
         - prof["main_separation_lp"] - prof["main_ray_shoot"]
     )
 
-    # --- cleanup: restore minimality lost to floating-point tie-breaking
+    # --- cleanup: restore minimality lost to floating-point tie-breaking.
+    # Only rays admitted through tie-broken shots can be impostors; rays that
+    # were the unique maximizer of some functional are provably vertices.
     if cleanup:
-        for e in sorted(E):
+        suspects = [e for e in sorted(E) if suspect.get(e, True)]
+        prof["n_suspects"] = len(suspects)
+        if verbose:
+            print(f"cleanup: {len(suspects)}/{len(E)} rays were tie-admitted")
+        for e in suspects:
             others = [x for x in E if x != e]
             if not others:
                 continue
