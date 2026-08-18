@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "extremal-rays"
+version = "0.1.0"
+description = "Fast extremal rays of pointed polyhedral cones via Clarkson's output-sensitive algorithm"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+authors = [{ name = "Liam McAllister Group" }]
+dependencies = [
+    "numpy",
+    "scipy",
+    "highspy",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
