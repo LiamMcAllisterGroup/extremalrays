@@ -44,6 +44,9 @@ _INF = highspy.kHighsInf
 # wall-time breakdown of the most recent exhaustive() call, in seconds
 LAST_PROFILE: dict = {}
 
+_CKPT_HINT_DELAY = 30.0      # seconds of sweeping before estimating
+_CKPT_HINT_REMAINING = 600.0  # warn if this much work remains uncheckpointed
+
 
 # -----------------------------------------------------------------------------
 # preprocessing
@@ -740,6 +743,22 @@ def exhaustive(R: ArrayLike,
     n_lp = 0
     last_ckpt = time.time()
     t_main = time.perf_counter()
+    hinted = checkpoint is not None
+
+    def hint():
+        # one-shot: suggest checkpointing while restarting is still cheap
+        nonlocal hinted
+        elapsed = time.perf_counter() - t_main
+        if hinted or elapsed < _CKPT_HINT_DELAY:
+            return
+        hinted = True
+        done = int((status != 0).sum())
+        remaining = elapsed * (n - done) / max(1, done)
+        if remaining > _CKPT_HINT_REMAINING:
+            warnings.warn(
+                f"roughly {remaining / 60:.0f} min of sweeping remain and "
+                "no checkpoint path is set; pass checkpoint= to make this "
+                "run resumable")
 
     def resolve(i):
         """One Clarkson resolution: redundant, or E grows until i is shot."""
@@ -793,6 +812,7 @@ def exhaustive(R: ArrayLike,
                 for k in failed:
                     if status[k] == 0:
                         resolve(k)
+                hint()
                 if verbose:
                     done = int((status != 0).sum())
                     print(f"  {done}/{n} candidates, |E| = {len(E)}")
@@ -810,6 +830,7 @@ def exhaustive(R: ArrayLike,
         if status[i] != 0:
             continue
         resolve(i)
+        hint()
         if verbose and (i + 1) % 500 == 0:
             print(f"  {i + 1}/{n} candidates, |E| = {len(E)}, LPs = {n_lp}")
         if checkpoint and time.time() - last_ckpt > 60:

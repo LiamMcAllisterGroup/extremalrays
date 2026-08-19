@@ -294,3 +294,12 @@ def test_known_seeds_reproduce_answer():
     assert len(seeds) > 0
     idx = exhaustive(R, known=seeds)
     assert idx.tolist() == full.tolist()
+
+
+def test_checkpoint_hint_warns(monkeypatch):
+    from extremal_rays import core
+    monkeypatch.setattr(core, "_CKPT_HINT_DELAY", 0.0)
+    monkeypatch.setattr(core, "_CKPT_HINT_REMAINING", 0.0)
+    R = _random_pointed_rays(3, n=40, d=4)
+    with pytest.warns(UserWarning, match="checkpoint"):
+        exhaustive(R)
