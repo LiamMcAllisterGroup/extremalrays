@@ -31,24 +31,31 @@ from scipy.sparse import csr_matrix
 from extremal_rays import exhaustive, sample, verify
 
 
-def brute_force(R):
-    """Reference implementation: test each ray against all others by LP.
-    Only viable for small inputs. Requires unique primitive integer rays."""
-    R = np.asarray(R, dtype=float)
-    ext = []
-    for i in range(len(R)):
-        others = np.delete(R, i, axis=0)
+def cytools_reference(R):
+    """Reference implementation: per-ray LP extremality, extracted from
+    CYTools (github.com/LiamMcAllisterGroup/cytools, src/cytools/cone.py,
+    Cone.extremal_rays / is_extremal with method="lp", GPL-3.0-or-later
+    like this package): ray i is extremal iff (R \\ r_i) lmbda = r_i,
+    lmbda >= 0 is infeasible; known-redundant rays are pruned from the
+    comparison set as in the original. Serialized, and one deviation: an
+    LP failure raises instead of counting as extremal (the original
+    treats any non-success as extremality). Returns the extremal rays as
+    a set of tuples. Only viable for small inputs."""
+    rays = np.array(sorted({tuple(r) for r in np.asarray(R, dtype=int)}))
+    flags = np.ones(len(rays), dtype=bool)
+    for i in range(len(rays)):
+        others = np.delete(rays, i, axis=0)[np.delete(flags, i)]
         res = linprog(
             c=np.zeros(len(others)),
-            A_eq=others.T,
-            b_eq=R[i],
+            A_eq=others.T.astype(float),
+            b_eq=rays[i].astype(float),
             bounds=[(0, None)],
             method="highs",
         )
         assert res.status in (0, 2), f"reference LP failed: {res.message}"
-        if res.status == 2:  # infeasible: not a combination of the others
-            ext.append(i)
-    return sorted(ext)
+        if res.status == 0:  # feasible: a combination of the others
+            flags[i] = False
+    return {tuple(r) for r in rays[flags]}
 
 
 def test_quadrant_2d():
@@ -120,7 +127,7 @@ def test_random_vs_brute_force(trial):
     R = np.unique(R // g[:, None], axis=0)
 
     idx = exhaustive(R)
-    assert sorted(idx.tolist()) == brute_force(R)
+    assert {tuple(r) for r in R[idx]} == cytools_reference(R)
 
     ok, report = verify(R, idx)
     assert ok, report["failures"]
@@ -339,12 +346,15 @@ def test_sample_margin_center_cg(monkeypatch):
 
 @pytest.mark.parametrize("h11", [15, 20, 25])
 def test_mori_cap_matches_cytools(h11):
-    # Mori-cone caps whose extremal rays were computed independently by
-    # CYTools' per-ray LP method (16/16 agreement across h11 = 5..25)
+    # Mori-cone caps: bundled ray matrices with the extremal sets a real
+    # CYTools run produced (16/16 agreement across h11 = 5..25 when
+    # frozen); the vendored reference must reproduce the stored answer,
+    # and exhaustive must match both
     import os
     data = np.load(os.path.join(os.path.dirname(__file__), "data",
                                 "mori_cap_crosscheck.npz"))
     R = data[f"rays_h11_{h11}"]
-    expected = {tuple(r) for r in data[f"extremal_h11_{h11}"]}
+    stored = {tuple(r) for r in data[f"extremal_h11_{h11}"]}
+    assert cytools_reference(R) == stored
     idx = exhaustive(csr_matrix(R))
-    assert {tuple(r) for r in R[idx]} == expected
+    assert {tuple(r) for r in R[idx]} == stored
