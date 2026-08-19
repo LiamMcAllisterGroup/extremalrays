@@ -1,0 +1,325 @@
+# =============================================================================
+#    Copyright (C) 2026  Nate MacFadden for the Liam McAllister Group
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# =============================================================================
+#
+# -----------------------------------------------------------------------------
+# Description:  Inner bound on the extremal-ray set: a cheap sampler that
+#               certifies rays extremal (never complete) by finding heights
+#               in the dual cone {h : R h >= 0} at which exactly one row is
+#               tight. Walkers land on a facet by ray shooting, then pursue
+#               uncertified rows facet-to-facet across ridges. Work is
+#               counted in R-matvecs.
+# -----------------------------------------------------------------------------
+from __future__ import annotations
+
+# external imports
+import numpy as np
+from numpy.typing import ArrayLike
+from scipy.optimize import linprog
+
+# local imports
+from .core import (_rows, _unique_primitive, _unique_primitive_sparse,
+                   positive_functional, sparse)
+
+_RECESSIVE = np.inf  # exit time of a direction that never leaves the cone
+
+
+def _margin_center(U) -> np.ndarray:
+    """
+    A well-centered interior point of {h : U h >= 0}: maximize the minimum
+    row-norm-relative slack over the box |h| <= 1. positive_functional's
+    min-sum point deliberately sits close to many facets, which skews the
+    angular measure that ray shooting samples facets by; this point does
+    not.
+    """
+    n, d = U.shape
+    if sparse.issparse(U):
+        norms = np.sqrt(np.asarray(U.multiply(U).sum(axis=1)).ravel())
+        A = sparse.hstack([-U, sparse.csr_matrix(norms[:, None])])
+    else:
+        norms = np.linalg.norm(U, axis=1)
+        A = np.column_stack([-U, norms])
+    c = np.zeros(d + 1)
+    c[-1] = -1.0
+    res = linprog(c=c, A_ub=A, b_ub=np.zeros(n),
+                  bounds=[(-1, 1)] * d + [(0, None)], method="highs")
+    if not res.success or res.x[-1] <= 0:
+        raise ValueError("no interior point: cone(R) is not full-dimensional"
+                         " or not pointed")
+    return res.x[:-1]
+
+
+def _exit_times(u: np.ndarray, W: np.ndarray) -> np.ndarray:
+    """
+    Per-row exit times along directions, from slacks u > 0 and rates W.
+
+    Row slacks along direction k evolve as u + t*W[:, k]; the entry (i, k)
+    is the time row i goes tight (inf if it never does).
+
+    Parameters
+    ----------
+    u : ndarray of shape (n,) or (n, m)
+        Current positive slacks R @ h, per walker if 2d.
+    W : ndarray of shape (n, m)
+        Slack rates R @ G for the direction matrix G.
+
+    Returns
+    -------
+    T : ndarray of shape (n, m)
+        Exit times, positive or inf.
+    """
+    if u.ndim == 1:
+        u = u[:, None]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        T = np.where(W < 0, u / -W, _RECESSIVE)
+    return T
+
+
+def _first_exits(T: np.ndarray,
+                 tie_tol: float) -> "tuple[np.ndarray, np.ndarray]":
+    """
+    First-tight row per column, or -1 for recessive/tied columns.
+
+    Parameters
+    ----------
+    T : ndarray of shape (n, m)
+        Exit times (see _exit_times).
+    tie_tol : float
+        Relative gap under which the two smallest exit times count as a tie
+        (the exit certifies nothing: two rows go tight together).
+
+    Returns
+    -------
+    rows : ndarray of shape (m,)
+        argmin row per column; -1 where recessive or tied.
+    times : ndarray of shape (m,)
+        The winning exit times (inf where recessive).
+    """
+    rows = np.argmin(T, axis=0)
+    two = np.partition(T, 1, axis=0)[:2]
+    times = two[0]
+    with np.errstate(invalid="ignore"):  # inf - inf on recessive columns
+        gap = two[1] - two[0]
+        bad = ~np.isfinite(times) | (gap <= tie_tol * np.maximum(times, 1.0))
+    rows = np.where(bad, -1, rows)
+    return rows, times
+
+
+def sample_extremal_rays(R: ArrayLike,
+                         work: int = 1000,
+                         n_walkers: int = 64,
+                         stall: int = 20,
+                         center: str = "margin",
+                         targeted: bool = True,
+                         jitter: float = 0.1,
+                         tie_tol: float = 1e-7,
+                         rng_seed: int = 0,
+                         verbose: bool = False,
+                         ) -> "tuple[np.ndarray, np.ndarray]":
+    """
+    Certified-extremal rays of cone(R), sampled cheaply (an inner bound).
+
+    Works in the dual cone H = {h : R h >= 0} and certifies a ray by
+    exhibiting a height at which exactly its row is tight (a supporting
+    hyperplane touching only that ray). Cannot prove completeness -- use
+    extremal_rays() for the full answer; this is for cheap lower bounds and
+    for seeding.
+
+    Walkers land on a facet by ray shooting from an interior point, then
+    hop facet-to-facet: move tangentially to the current facet until a
+    ridge, then step into the neighboring facet's relative interior (2
+    matvecs per hop, one new certificate per hop at best). With
+    targeted=True each walker pursues one uncertified row across hops --
+    projected descent of r_target . h over the facet graph -- which
+    negotiates around facets that block a straight shot; fruitless pursuits
+    teleport to a fresh shot.
+
+    Parameters
+    ----------
+    R : array-like or scipy.sparse matrix of shape (n, dim)
+        Matrix whose rows generate the cone. Requires rank(R) = dim (H
+        pointed), as extremal_rays() effectively does.
+    work : int, optional
+        Budget in R-matvec equivalents (the dominant cost; one shot = 1,
+        one hop = 2). Defaults to 1000.
+    n_walkers : int, optional
+        Concurrent walkers, hopping in lockstep so each round is 2 matmuls
+        of n_walkers columns. Defaults to 64.
+    stall : int, optional
+        Legs before a fruitless pursuit is abandoned (the walker teleports
+        to a fresh shot and picks a new target); certifying anything new
+        resets the clock. Defaults to 20.
+    center : str, optional
+        Interior point to shoot from: "margin" (default) maximizes the
+        minimum row-norm-relative slack (one LP; fair angular sampling), or
+        "functional" reuses positive_functional's min-sum point (cheaper,
+        but it sits close to many facets and skews the sampling).
+    targeted : bool, optional
+        Pursue not-yet-certified rows (direction -r_i plus jitter, never
+        recessive since row i's slack strictly decreases) instead of
+        hopping at random. Defaults to True.
+    jitter : float, optional
+        Relative isotropic noise on targeted directions; 0 makes each
+        target deterministic. Defaults to 0.1.
+    tie_tol : float, optional
+        Relative tolerance on exit-time gaps; tied exits certify nothing.
+        Defaults to 1e-7.
+    rng_seed : int, optional
+        Seed; results are deterministic for a fixed value. Defaults to 0.
+    verbose : bool, optional
+        Whether to print progress. Defaults to False.
+
+    Returns
+    -------
+    idx : ndarray of shape (n_certified,)
+        Sorted indices into R of certified-extremal rays (first occurrence
+        for duplicated directions).
+    curve : ndarray of shape (n_records, 2)
+        Discovery curve: rows (matvecs_spent, n_certified so far).
+    """
+    if sparse.issparse(R):
+        U, rep = _unique_primitive_sparse(sparse.csr_matrix(R))
+    else:
+        U, rep = _unique_primitive(np.asarray(R))
+    n, d = U.shape
+
+    if center == "margin":
+        h0 = _margin_center(U)
+    elif center == "functional":
+        h0 = positive_functional(U)
+    else:
+        raise ValueError(f"unknown center {center!r}")
+    u0 = U @ h0
+    rng = np.random.default_rng(rng_seed)
+
+    found = set()
+    curve = [(0, 0)]
+    spent = 0
+
+    def record():
+        curve.append((spent, len(found)))
+        if verbose:
+            print(f"  {spent} matvecs: {len(found)} certified")
+
+    # per-walker state (height h, slacks u, tight row, pursued target, legs
+    # since retarget). tight < 0 marks a walker shooting from h0. With
+    # targeted=True a walker keeps ONE target and slides toward it -- each
+    # leg moves along -r_target projected tangent to the blocking facet, so
+    # the target's slack strictly decreases across hops (projected descent
+    # of r_target . h over the facet graph) until the target goes tight or
+    # the pursuit is abandoned after `stall` legs.
+    m = n_walkers
+    H = np.tile(h0[:, None], (1, m))
+    S = np.tile(u0[:, None], (1, m))
+    tight = np.full(m, -1, dtype=int)
+    target = np.full(m, -1, dtype=int)
+    stalled = np.zeros(m, dtype=int)
+    rounds = 0
+
+    def retarget(mask):
+        """Assign fresh uncertified targets to the masked walkers."""
+        if not targeted or not mask.any():
+            return
+        cand = np.setdiff1d(np.arange(n), np.fromiter(found, dtype=int),
+                            assume_unique=True)
+        if len(cand):
+            target[mask] = rng.choice(cand, int(mask.sum()))
+            stalled[mask] = 0
+
+    retarget(np.ones(m, dtype=bool))
+
+    while spent < work:
+        # leg 1: pursue the target (or random direction) tangent to the
+        # current facet; restarting walkers shoot straight from h0
+        G = rng.standard_normal((d, m))
+        has_t = target >= 0
+        if has_t.any():
+            aim = _rows(U, target[has_t])
+            aim = aim / np.linalg.norm(aim, axis=1)[:, None]
+            G[:, has_t] = -aim.T + jitter * G[:, has_t] / np.sqrt(d)
+        on_facet = tight >= 0
+        if on_facet.any():
+            Ri = _rows(U, tight[on_facet])
+            dots = np.einsum("ij,ji->i", Ri, G[:, on_facet])
+            G[:, on_facet] -= Ri.T * (dots / (Ri * Ri).sum(axis=1))
+        W = U @ G
+        spent += m
+        T = _exit_times(S, W)
+        T[tight[on_facet], np.flatnonzero(on_facet)] = _RECESSIVE
+        rows, times = _first_exits(T, tie_tol)
+
+        ok = rows >= 0
+        t = np.where(ok, times, 0.0)
+        H += G * t
+        S += W * t
+        S[rows[ok], np.flatnonzero(ok)] = 0.0
+
+        # walkers that shot from h0 land on a facet and certify it now
+        landed = ok & ~on_facet
+        for k in np.flatnonzero(landed):
+            found.add(int(rows[k]))
+        tight = np.where(landed, rows, tight)
+
+        # leg 2: walkers at a ridge (i, j) step into facet j's interior,
+        # along r_i projected tangent to r_j (leaves j tight, frees i)
+        ridge = ok & on_facet
+        if ridge.any():
+            kk = np.flatnonzero(ridge)
+            i_rows, j_rows = tight[kk], rows[kk]
+            Ri, Rj = _rows(U, i_rows), _rows(U, j_rows)
+            coef = (Ri * Rj).sum(axis=1) / (Rj * Rj).sum(axis=1)
+            E = (Ri - Rj * coef[:, None]).T
+            V = U @ E
+            spent += len(kk)
+            T = _exit_times(np.where(S[:, kk] > 0, S[:, kk], _RECESSIVE), V)
+            t_max = T.min(axis=0)
+            t2 = np.where(np.isfinite(t_max), t_max / 2, 1.0)
+            H[:, kk] += E * t2
+            S[:, kk] += V * t2
+            S[j_rows, kk] = 0.0
+            new = np.array([int(j) not in found for j in j_rows])
+            for j in j_rows:
+                found.add(int(j))
+            tight[kk] = j_rows
+            stalled[kk] = np.where(new, -1, stalled[kk])  # progress: reprieve
+
+        # bookkeeping on pursuits: reached or already-certified targets get
+        # fresh ones; hopeless pursuits are abandoned (teleport + retarget)
+        stalled += 1
+        caught = has_t & np.isin(target, np.fromiter(found, dtype=int))
+        retarget(caught)
+        give_up = ~ok | (stalled > stall)
+        if give_up.any():
+            H[:, give_up] = h0[:, None]
+            S[:, give_up] = u0[:, None]
+            tight[give_up] = -1
+            retarget(give_up)
+            stalled[give_up] = 0
+
+        # keep magnitudes tame (heights are projective) and refresh the
+        # incrementally-updated slacks periodically against float drift
+        scale = np.abs(H).max(axis=0)
+        H /= scale
+        S /= scale
+        rounds += 1
+        if rounds % 50 == 0:
+            S = U @ H
+            spent += m
+            S[tight[tight >= 0], np.flatnonzero(tight >= 0)] = 0.0
+        record()
+
+    idx = np.array(sorted(found), dtype=int)
+    return np.sort(rep[idx]), np.array(curve)

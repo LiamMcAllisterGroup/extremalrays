@@ -81,22 +81,67 @@ def _rows(P, idx) -> np.ndarray:
 
 def _padded_key(U: "sparse.csr_matrix") -> np.ndarray:
     """
-    Fixed-width row keys for a CSR matrix: each row becomes its column
-    indices padded with ``dim`` followed by its values' int64 bit patterns
-    padded with 0. Since indices are sorted, distinct rows get distinct
-    keys, so the keys support exact deduplication; they also give a
-    deterministic support-locality order for ``sort_candidates``.
+    Fixed-width row keys for a CSR matrix, packed into few uint64 columns.
+
+    Each row becomes its column indices (padded with ``dim``, then packed
+    several per word) followed by one word per value slot, holding the
+    float's bit pattern with the sign bit flipped (and the rest complemented
+    for negatives), so unsigned bitwise order equals numeric order. Distinct
+    rows get distinct keys (indices are sorted, the value map is injective),
+    so the keys support exact deduplication; lexicographic order on them is
+    lexicographic (support, values) order for ``sort_candidates``. Few
+    int64-sized columns keep the sorts on numpy's fast scalar paths instead
+    of np.unique(axis=0)'s per-row byte comparisons.
     """
     n, d = U.shape
     nnz = np.diff(U.indptr)
     width = int(nnz.max()) if n else 0
-    idx = np.full((n, width), d, dtype=np.int64)
+    idx = np.full((n, width), d, dtype=np.uint64)
     val = np.zeros((n, width), dtype=np.float64)
     rows = np.repeat(np.arange(n), nnz)
     cols = np.arange(U.nnz) - np.repeat(U.indptr[:-1], nnz)
     idx[rows, cols] = U.indices
     val[rows, cols] = U.data
-    return np.hstack([idx, val.view(np.int64)])
+
+    bits = max(1, int(d).bit_length())
+    per = max(1, 63 // bits)
+    packed = []
+    for start in range(0, width, per):
+        key = np.zeros(n, dtype=np.uint64)
+        for j in range(start, min(start + per, width)):
+            key = (key << np.uint64(bits)) | idx[:, j]
+        packed.append(key)
+
+    b = val.view(np.int64)
+    monotone = np.where(b < 0, ~b, b ^ np.int64(-2**63)).view(np.uint64)
+    return np.column_stack(packed + [monotone[:, j] for j in range(width)])
+
+
+def _first_unique(keys: np.ndarray) -> np.ndarray:
+    """
+    Row indices of the first occurrence of each distinct key row, ascending.
+
+    One scalar argsort on the leading key finds candidate duplicate runs;
+    only rows inside a run get the exact multi-key comparison. Duplicates
+    keep the copy with the smallest row index.
+    """
+    n = len(keys)
+    order = np.argsort(keys[:, 0], kind="stable")
+    k0 = keys[order, 0]
+    eq_prev = np.zeros(n, dtype=bool)
+    eq_prev[1:] = (k0[1:] == k0[:-1])
+    in_run = eq_prev.copy()
+    in_run[:-1] |= eq_prev[1:]
+    rr = order[in_run]
+
+    mask = np.ones(n, dtype=bool)
+    if len(rr):
+        sub = keys[rr]
+        o2 = np.lexsort((rr,) + tuple(sub.T[::-1]))
+        subs = sub[o2]
+        dup = (subs[1:] == subs[:-1]).all(axis=1)
+        mask[rr[o2[1:][dup]]] = False
+    return np.flatnonzero(mask)
 
 
 def _unique_primitive_sparse(
@@ -128,8 +173,7 @@ def _unique_primitive_sparse(
     U = sparse.csr_matrix((data, R.indices, indptr),
                           shape=(len(orig), R.shape[1]))
 
-    _, first = np.unique(_padded_key(U), axis=0, return_index=True)
-    first.sort()
+    first = _first_unique(_padded_key(U))
     return U[first], orig[first]
 
 

@@ -258,3 +258,30 @@ def test_sparse_non_pointed_raises():
     R = csr_matrix(np.array([[1, 0], [-1, 0], [0, 1]]))
     with pytest.raises(ValueError, match="not pointed"):
         extremal_rays(R)
+
+
+from extremal_rays import sample_extremal_rays
+
+
+def test_sample_is_certified_subset():
+    R = _random_pointed_rays(4, n=60, d=5)
+    true = set(extremal_rays(R).tolist())
+    idx, curve = sample_extremal_rays(R, work=500)
+    assert set(idx.tolist()) <= true
+    assert len(idx) > 0
+    assert (np.diff(curve[:, 1]) >= 0).all()  # monotone discovery
+    assert (np.diff(curve[:, 0]) > 0).all()   # work strictly increases
+
+
+def test_sample_sparse_matches_dense():
+    R = _random_pointed_rays(8, n=50, d=5)
+    a, _ = sample_extremal_rays(R, work=300)
+    b, _ = sample_extremal_rays(csr_matrix(R), work=300)
+    assert a.tolist() == b.tolist()
+
+
+def test_sample_deterministic():
+    R = _random_pointed_rays(2, n=50, d=4)
+    a, ca = sample_extremal_rays(R, work=300, rng_seed=3)
+    b, cb = sample_extremal_rays(R, work=300, rng_seed=3)
+    assert a.tolist() == b.tolist() and (ca == cb).all()
