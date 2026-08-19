@@ -335,3 +335,16 @@ def test_sample_margin_center_cg(monkeypatch):
     R = _random_pointed_rays(13, n=80, d=4)
     idx, _ = sample(R, work=300)
     assert set(idx.tolist()) <= set(exhaustive(R).tolist())
+
+
+@pytest.mark.parametrize("h11", [15, 20, 25])
+def test_mori_cap_matches_cytools(h11):
+    # Mori-cone caps whose extremal rays were computed independently by
+    # CYTools' per-ray LP method (16/16 agreement across h11 = 5..25)
+    import os
+    data = np.load(os.path.join(os.path.dirname(__file__), "data",
+                                "mori_cap_crosscheck.npz"))
+    R = data[f"rays_h11_{h11}"]
+    expected = {tuple(r) for r in data[f"extremal_h11_{h11}"]}
+    idx = exhaustive(csr_matrix(R))
+    assert {tuple(r) for r in R[idx]} == expected
