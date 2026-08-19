@@ -41,7 +41,7 @@ from scipy.optimize import linprog
 
 _INF = highspy.kHighsInf
 
-# wall-time breakdown of the most recent extremal_rays() call, in seconds
+# wall-time breakdown of the most recent exhaustive() call, in seconds
 LAST_PROFILE: dict = {}
 
 
@@ -83,15 +83,11 @@ def _padded_key(U: "sparse.csr_matrix") -> np.ndarray:
     """
     Fixed-width row keys for a CSR matrix, packed into few uint64 columns.
 
-    Each row becomes its column indices (padded with ``dim``, then packed
-    several per word) followed by one word per value slot, holding the
-    float's bit pattern with the sign bit flipped (and the rest complemented
-    for negatives), so unsigned bitwise order equals numeric order. Distinct
-    rows get distinct keys (indices are sorted, the value map is injective),
-    so the keys support exact deduplication; lexicographic order on them is
-    lexicographic (support, values) order for ``sort_candidates``. Few
-    int64-sized columns keep the sorts on numpy's fast scalar paths instead
-    of np.unique(axis=0)'s per-row byte comparisons.
+    Each row becomes its column indices (padded with ``dim``, packed
+    several per word) followed by one word per value, the float's bits
+    mapped so that unsigned order equals numeric order. Distinct rows get
+    distinct keys, and lexicographic key order is lexicographic
+    (support, values) row order.
     """
     n, d = U.shape
     nnz = np.diff(U.indptr)
@@ -427,20 +423,19 @@ def _fingerprint(U) -> str:
     Cheap input fingerprint guarding checkpoint resumes against a changed
     ray matrix (shape, edge blocks, and total mass -- not cryptographic).
     """
-    h = hashlib.sha256()
     if sparse.issparse(U):
-        h.update(str(U.shape).encode())
-        h.update(str(U.nnz).encode())
-        h.update(U.data[:64].tobytes())
-        h.update(U.data[-64:].tobytes())
-        h.update(U.indices[:64].tobytes())
-        h.update(str(float(np.abs(U.data).sum())).encode())
-        return h.hexdigest()
-    b = np.ascontiguousarray(U)
-    h.update(str(b.shape).encode())
-    h.update(b[:64].tobytes())
-    h.update(b[-64:].tobytes())
-    h.update(str(float(np.abs(b).sum())).encode())
+        blocks = [U.data[:64], U.data[-64:], U.indices[:64]]
+        head = f"{U.shape}{U.nnz}"
+        mass = np.abs(U.data).sum()
+    else:
+        b = np.ascontiguousarray(U)
+        blocks = [b[:64], b[-64:]]
+        head = f"{b.shape}"
+        mass = np.abs(b).sum()
+    h = hashlib.sha256(head.encode())
+    for blk in blocks:
+        h.update(np.ascontiguousarray(blk).tobytes())
+    h.update(str(float(mass)).encode())
     return h.hexdigest()
 
 
@@ -533,7 +528,7 @@ def _pool_sweep(args):
 # main algorithm
 # -----------------------------------------------------------------------------
 
-def extremal_rays(R: ArrayLike,
+def exhaustive(R: ArrayLike,
                   tol: float = 1e-7,
                   seed_shots: "int | str" = "auto",
                   cleanup: bool = True,
@@ -541,7 +536,7 @@ def extremal_rays(R: ArrayLike,
                   rng_seed: int = 0,
                   n_workers: int = 0,
                   checkpoint: "str | None" = None,
-                  sort_candidates: bool = True,
+                  sort_candidates: bool = False,
                   known: "ArrayLike | None" = None) -> np.ndarray:
     """
     Indices of a minimal generating subset of the rays R of a pointed cone.
@@ -593,15 +588,20 @@ def extremal_rays(R: ArrayLike,
         lost on a crash). Defaults to None.
     sort_candidates : bool, optional
         Process candidates in lexicographic ray order rather than input
-        order, keeping similar rays adjacent so the oracle's warm starts
-        pay off (measured up to ~10x on shuffled input). The returned
-        indices are unaffected. Defaults to True.
+        order. Candidate order sets the oracle's warm-start quality:
+        locality-ordered input (e.g. generated group-by-group, the common
+        case) typically beats the lexsort by ~20%, but UNSTRUCTURED input
+        without the lexsort degrades by orders of magnitude (a shuffled
+        benchmark ran > 78 min vs 20.7 s) -- pass True unless the input
+        order is known to be structured. The returned indices are
+        unaffected. Defaults to False.
     known : array-like of int | None, optional
         Indices into R of rays already certified extremal, preloaded into
         the confirmed set. Almost always None: certified rays are rarely
-        in hand at onset (see the note above). Wrong entries corrupt the
-        result -- pass only certificate-backed indices. Ignored on
-        checkpoint resume. Defaults to None.
+        in hand at onset, and seeding is not a speed play (one preloaded
+        ray spares about one LP, capping the saving near n_extremal/n).
+        Wrong entries corrupt the result. Ignored on checkpoint resume.
+        Defaults to None.
 
     Returns
     -------
@@ -617,19 +617,6 @@ def extremal_rays(R: ArrayLike,
     Notes
     -----
     A wall-time breakdown of the call is stored in ``core.LAST_PROFILE``.
-
-    Certified extremal rays are almost never in hand at the onset of a
-    computation, so `known` should almost always be left None. It exists
-    for the rare resume-like cases where they exist anyway (a prior run on
-    the same cone, an interrupted job). It is NOT a speed play: one
-    preloaded ray spares the sweep about one discovery (~1 extra
-    separation LP + ray shoot), capping the saving near n_extremal/n of
-    the total, so sampling rays first just to seed costs more than it
-    saves.
-
-    Candidate ORDER matters for speed: the oracle warm-starts between
-    consecutive LPs, so orderings that keep similar rays adjacent (e.g.
-    sorted rows) run up to ~10x faster than shuffled input.
     """
     prof = {k: 0.0 for k in (
         "preprocess", "positive_functional", "seeding",
@@ -717,9 +704,7 @@ def extremal_rays(R: ArrayLike,
                        suspects=np.array([suspect[j] for j in E], dtype=bool),
                        fingerprint=np.array(fp))
 
-    # --- known extremal rays (e.g. from sample_extremal_rays) join E
-    # directly; their unique-tight certificates meet the same standard that
-    # exempts untied shots from cleanup, so they are not marked suspect
+    # preload known rays; their certificates match the untied-shot standard
     if known is not None and not resumed:
         inv = {int(r): j for j, r in enumerate(rep)}
         for k in np.asarray(known, dtype=int):
@@ -779,11 +764,8 @@ def extremal_rays(R: ArrayLike,
         raise RuntimeError(f"failed to resolve candidate {i}")
 
     if n_workers:
-        # streaming parallel sweeps: workers pull candidate chunks as they
-        # finish (no round barrier), each against the E snapshot current at
-        # dispatch; the rare separation failures are resolved serially here
-        # while the workers keep going. Verdicts against a stale snapshot
-        # stay valid because E only grows.
+        # workers pull chunks against frozen E snapshots (valid: E only
+        # grows); the rare separation failures are re-resolved serially
         from multiprocessing import get_context
         blocks, desc = _shm_export(P)
         pool = get_context("spawn").Pool(
@@ -892,7 +874,7 @@ def extremal_rays(R: ArrayLike,
                     f"ray {rep[e]} is numerically borderline (separation "
                     f"margin {val:.2e}, no membership certificate); keeping "
                     "it -- the result generates the cone but may not be "
-                    "minimal. Consider verify_extremal_rays()."
+                    "minimal. Consider verify()."
                 )
 
     save_ckpt()

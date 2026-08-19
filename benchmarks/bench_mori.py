@@ -35,7 +35,7 @@ import time
 import numpy as np
 
 # local imports
-from extremal_rays import extremal_rays, verify_extremal_rays
+from extremal_rays import exhaustive, verify
 
 DATA = pathlib.Path(__file__).parent / "data" / "mori_rays_h11_491.npz"
 
@@ -53,14 +53,14 @@ def main():
     print(f"rays: {rays.shape}")
 
     t0 = time.time()
-    idx = extremal_rays(rays, seed_shots=seed_shots, verbose=True)
+    idx = exhaustive(rays, seed_shots=seed_shots, verbose=True)
     t1 = time.time()
     print(f"\n{len(idx)} extremal rays in {t1 - t0:.1f}s")
     assert len(idx) == 884, f"expected 884 extremal rays, got {len(idx)}"
 
     if args.verify:
         t0 = time.time()
-        ok, report = verify_extremal_rays(rays, idx, verbose=True)
+        ok, report = verify(rays, idx, verbose=True)
         print(f"verified: {ok} in {time.time() - t0:.1f}s")
         assert ok, report["failures"]
 

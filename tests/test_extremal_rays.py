@@ -28,7 +28,7 @@ from scipy.optimize import linprog
 from scipy.sparse import csr_matrix
 
 # local imports
-from extremal_rays import extremal_rays, verify_extremal_rays
+from extremal_rays import exhaustive, verify
 
 
 def brute_force(R):
@@ -53,7 +53,7 @@ def brute_force(R):
 
 def test_quadrant_2d():
     R = [[0, 1], [1, 3], [1, 1], [3, 1], [1, 0]]
-    idx = extremal_rays(R)
+    idx = exhaustive(R)
     assert sorted(idx) == [0, 4]
 
 
@@ -61,31 +61,31 @@ def test_duplicates_and_scalings():
     # duplicated directions (exact copies and positive multiples) collapse
     # to the first occurrence
     R = [[1, 0], [2, 0], [1, 1], [0, 3], [0, 1], [1, 0]]
-    idx = extremal_rays(R)
+    idx = exhaustive(R)
     assert sorted(idx) == [0, 3]
 
 
 def test_zero_ray_dropped():
     R = [[0, 0], [1, 0], [0, 1], [1, 1]]
-    idx = extremal_rays(R)
+    idx = exhaustive(R)
     assert sorted(idx) == [1, 2]
 
 
 def test_single_ray():
-    assert extremal_rays([[2, 3, 5]]).tolist() == [0]
-    assert extremal_rays([[2, 3, 5], [4, 6, 10]]).tolist() == [0]
+    assert exhaustive([[2, 3, 5]]).tolist() == [0]
+    assert exhaustive([[2, 3, 5], [4, 6, 10]]).tolist() == [0]
 
 
 def test_simplicial_3d():
     R = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], [2, 1, 3]]
-    idx = extremal_rays(R)
+    idx = exhaustive(R)
     assert sorted(idx) == [0, 1, 2]
 
 
 def test_all_extremal():
     # cube vertices lifted to the slice x0 = 1: all 8 are extremal
     cube = [(1, a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1)]
-    idx = extremal_rays(cube)
+    idx = exhaustive(cube)
     assert sorted(idx) == list(range(8))
 
 
@@ -93,7 +93,7 @@ def test_tie_stress_grid_face():
     # a 5x5 integer grid on a square face: heavy ties under ray shooting;
     # only the 4 corners are extremal
     R = [(1, i, j) for i in range(5) for j in range(5)]
-    idx = extremal_rays(R)
+    idx = exhaustive(R)
     corners = sorted(
         k for k, (_, i, j) in enumerate(R) if i in (0, 4) and j in (0, 4)
     )
@@ -103,7 +103,7 @@ def test_tie_stress_grid_face():
 def test_non_pointed_raises():
     R = [[1, 0], [-1, 0], [0, 1]]
     with pytest.raises(ValueError, match="not pointed"):
-        extremal_rays(R)
+        exhaustive(R)
 
 
 @pytest.mark.parametrize("trial", range(10))
@@ -119,10 +119,10 @@ def test_random_vs_brute_force(trial):
     g = np.gcd.reduce(np.abs(R), axis=1)
     R = np.unique(R // g[:, None], axis=0)
 
-    idx = extremal_rays(R)
+    idx = exhaustive(R)
     assert sorted(idx.tolist()) == brute_force(R)
 
-    ok, report = verify_extremal_rays(R, idx)
+    ok, report = verify(R, idx)
     assert ok, report["failures"]
 
 
@@ -133,26 +133,26 @@ def test_seeding_disabled_matches():
     )
     g = np.gcd.reduce(np.abs(R), axis=1)
     R = np.unique(R // g[:, None], axis=0)
-    a = extremal_rays(R, seed_shots=0)
-    b = extremal_rays(R, seed_shots="auto")
+    a = exhaustive(R, seed_shots=0)
+    b = exhaustive(R, seed_shots="auto")
     assert a.tolist() == b.tolist()
 
 
 def test_float_input_integral_values():
     R = np.array([[1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-    assert sorted(extremal_rays(R)) == [0, 2]
+    assert sorted(exhaustive(R)) == [0, 2]
 
 
 def test_verify_catches_wrong_answers():
     R = np.array([[1, 0], [1, 1], [0, 1], [2, 1]])
     # missing an extremal ray
-    ok, _ = verify_extremal_rays(R, [0])
+    ok, _ = verify(R, [0])
     assert not ok
     # including a redundant ray
-    ok, _ = verify_extremal_rays(R, [0, 1, 2])
+    ok, _ = verify(R, [0, 1, 2])
     assert not ok
     # correct answer
-    ok, _ = verify_extremal_rays(R, [0, 2])
+    ok, _ = verify(R, [0, 2])
     assert ok
 
 
@@ -168,14 +168,14 @@ def _random_pointed_rays(seed, n=40, d=4):
 @pytest.mark.parametrize("trial", range(3))
 def test_parallel_matches_serial(trial):
     R = _random_pointed_rays(trial)
-    a = extremal_rays(R)
-    b = extremal_rays(R, n_workers=2)
+    a = exhaustive(R)
+    b = exhaustive(R, n_workers=2)
     assert a.tolist() == b.tolist()
 
 
 def test_parallel_tie_stress():
     R = [(1, i, j) for i in range(5) for j in range(5)]
-    idx = extremal_rays(R, n_workers=2)
+    idx = exhaustive(R, n_workers=2)
     corners = sorted(
         k for k, (_, i, j) in enumerate(R) if i in (0, 4) and j in (0, 4)
     )
@@ -185,39 +185,39 @@ def test_parallel_tie_stress():
 def test_checkpoint_resume(tmp_path):
     R = _random_pointed_rays(7)
     ck = str(tmp_path / "state.npz")
-    a = extremal_rays(R, checkpoint=ck)
+    a = exhaustive(R, checkpoint=ck)
     assert (tmp_path / "state.npz").exists()
     # rerun resumes the completed state and reproduces the result
-    b = extremal_rays(R, checkpoint=ck)
+    b = exhaustive(R, checkpoint=ck)
     assert a.tolist() == b.tolist()
 
 
 def test_checkpoint_fingerprint_guard(tmp_path):
     ck = str(tmp_path / "state.npz")
     R1 = _random_pointed_rays(1)
-    extremal_rays(R1, checkpoint=ck)
+    exhaustive(R1, checkpoint=ck)
     # different rays with the same path must not resume the stale state
     R2 = _random_pointed_rays(2)
-    idx = extremal_rays(R2, checkpoint=ck)
-    assert idx.tolist() == extremal_rays(R2).tolist()
+    idx = exhaustive(R2, checkpoint=ck)
+    assert idx.tolist() == exhaustive(R2).tolist()
 
 
 def test_sorted_and_unsorted_agree():
     R = _random_pointed_rays(11, n=60, d=5)
     rng = np.random.default_rng(0)
     shuffled = R[rng.permutation(len(R))]
-    a = {tuple(r) for r in R[extremal_rays(R)]}
-    b = {tuple(r) for r in shuffled[extremal_rays(shuffled)]}
+    a = {tuple(r) for r in R[exhaustive(R)]}
+    b = {tuple(r) for r in shuffled[exhaustive(shuffled)]}
     c = {tuple(r) for r in
-         shuffled[extremal_rays(shuffled, sort_candidates=False)]}
+         shuffled[exhaustive(shuffled, sort_candidates=False)]}
     assert a == b == c
 
 
 @pytest.mark.parametrize("trial", range(5))
 def test_sparse_matches_dense(trial):
     R = _random_pointed_rays(trial, n=50, d=5)
-    a = extremal_rays(R)
-    b = extremal_rays(csr_matrix(R))
+    a = exhaustive(R)
+    b = exhaustive(csr_matrix(R))
     assert a.tolist() == b.tolist()
 
 
@@ -228,45 +228,45 @@ def test_sparse_float_matches_dense():
     )
     R[np.abs(R) < 1.2] = 0.0  # genuine sparsity, non-integral values
     R[:, 0] = np.abs(R[:, 0]) + 1
-    a = extremal_rays(R)
-    b = extremal_rays(csr_matrix(R))
+    a = exhaustive(R)
+    b = exhaustive(csr_matrix(R))
     assert a.tolist() == b.tolist()
 
 
 def test_sparse_duplicates_and_zero_rows():
     R = np.array([[1, 0], [2, 0], [0, 0], [1, 1], [0, 1], [0, 3]])
-    idx = extremal_rays(csr_matrix(R))
+    idx = exhaustive(csr_matrix(R))
     assert sorted(idx.tolist()) == [0, 4]
 
 
 def test_sparse_parallel_matches_serial():
     R = csr_matrix(_random_pointed_rays(5, n=60, d=5))
-    a = extremal_rays(R)
-    b = extremal_rays(R, n_workers=2)
+    a = exhaustive(R)
+    b = exhaustive(R, n_workers=2)
     assert a.tolist() == b.tolist()
 
 
 def test_sparse_checkpoint_resume(tmp_path):
     R = csr_matrix(_random_pointed_rays(9))
     ck = str(tmp_path / "state.npz")
-    a = extremal_rays(R, checkpoint=ck)
-    b = extremal_rays(R, checkpoint=ck)
+    a = exhaustive(R, checkpoint=ck)
+    b = exhaustive(R, checkpoint=ck)
     assert a.tolist() == b.tolist()
 
 
 def test_sparse_non_pointed_raises():
     R = csr_matrix(np.array([[1, 0], [-1, 0], [0, 1]]))
     with pytest.raises(ValueError, match="not pointed"):
-        extremal_rays(R)
+        exhaustive(R)
 
 
-from extremal_rays import sample_extremal_rays
+from extremal_rays import sample
 
 
 def test_sample_is_certified_subset():
     R = _random_pointed_rays(4, n=60, d=5)
-    true = set(extremal_rays(R).tolist())
-    idx, curve = sample_extremal_rays(R, work=500)
+    true = set(exhaustive(R).tolist())
+    idx, curve = sample(R, work=500)
     assert set(idx.tolist()) <= true
     assert len(idx) > 0
     assert (np.diff(curve[:, 1]) >= 0).all()  # monotone discovery
@@ -275,22 +275,22 @@ def test_sample_is_certified_subset():
 
 def test_sample_sparse_matches_dense():
     R = _random_pointed_rays(8, n=50, d=5)
-    a, _ = sample_extremal_rays(R, work=300)
-    b, _ = sample_extremal_rays(csr_matrix(R), work=300)
+    a, _ = sample(R, work=300)
+    b, _ = sample(csr_matrix(R), work=300)
     assert a.tolist() == b.tolist()
 
 
 def test_sample_deterministic():
     R = _random_pointed_rays(2, n=50, d=4)
-    a, ca = sample_extremal_rays(R, work=300, rng_seed=3)
-    b, cb = sample_extremal_rays(R, work=300, rng_seed=3)
+    a, ca = sample(R, work=300, rng_seed=3)
+    b, cb = sample(R, work=300, rng_seed=3)
     assert a.tolist() == b.tolist() and (ca == cb).all()
 
 
 def test_known_seeds_reproduce_answer():
     R = _random_pointed_rays(6, n=60, d=5)
-    full = extremal_rays(R)
-    seeds, _ = sample_extremal_rays(R, work=200)
+    full = exhaustive(R)
+    seeds, _ = sample(R, work=200)
     assert len(seeds) > 0
-    idx = extremal_rays(R, known=seeds)
+    idx = exhaustive(R, known=seeds)
     assert idx.tolist() == full.tolist()

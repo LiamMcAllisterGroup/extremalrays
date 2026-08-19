@@ -39,11 +39,9 @@ _RECESSIVE = np.inf  # exit time of a direction that never leaves the cone
 
 def _margin_center(U) -> np.ndarray:
     """
-    A well-centered interior point of {h : U h >= 0}: maximize the minimum
-    row-norm-relative slack over the box |h| <= 1. positive_functional's
-    min-sum point deliberately sits close to many facets, which skews the
-    angular measure that ray shooting samples facets by; this point does
-    not.
+    An interior point of {h : U h >= 0} maximizing the minimum
+    row-norm-relative slack over the box |h| <= 1 (fairer angular sampling
+    than positive_functional's min-sum point).
     """
     n, d = U.shape
     if sparse.issparse(U):
@@ -71,8 +69,8 @@ def _exit_times(u: np.ndarray, W: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    u : ndarray of shape (n,) or (n, m)
-        Current positive slacks R @ h, per walker if 2d.
+    u : ndarray of shape (n, m)
+        Current positive slacks R @ h, per walker.
     W : ndarray of shape (n, m)
         Slack rates R @ G for the direction matrix G.
 
@@ -81,8 +79,6 @@ def _exit_times(u: np.ndarray, W: np.ndarray) -> np.ndarray:
     T : ndarray of shape (n, m)
         Exit times, positive or inf.
     """
-    if u.ndim == 1:
-        u = u[:, None]
     with np.errstate(divide="ignore", invalid="ignore"):
         T = np.where(W < 0, u / -W, _RECESSIVE)
     return T
@@ -118,7 +114,7 @@ def _first_exits(T: np.ndarray,
     return rows, times
 
 
-def sample_extremal_rays(R: ArrayLike,
+def sample(R: ArrayLike,
                          work: int = 1000,
                          n_walkers: int = 64,
                          stall: int = 20,
@@ -136,23 +132,20 @@ def sample_extremal_rays(R: ArrayLike,
     exhibiting a height at which exactly its row is tight (a supporting
     hyperplane touching only that ray). Cannot prove completeness, has
     no reliable coverage estimate, and saturates below the full set -- use
-    extremal_rays() whenever the deliverable is THE extremal rays; this is
+    exhaustive() whenever the deliverable is THE extremal rays; this is
     for cheaply picking off certified rays when any witness will do.
 
     Walkers land on a facet by ray shooting from an interior point, then
-    hop facet-to-facet: move tangentially to the current facet until a
-    ridge, then step into the neighboring facet's relative interior (2
-    matvecs per hop, one new certificate per hop at best). With
-    targeted=True each walker pursues one uncertified row across hops --
-    projected descent of r_target . h over the facet graph -- which
-    negotiates around facets that block a straight shot; fruitless pursuits
-    teleport to a fresh shot.
+    hop facet-to-facet across ridges (2 matvecs per hop, at best one new
+    certificate each). With targeted=True each walker pursues one
+    uncertified row across hops; fruitless pursuits teleport to a fresh
+    shot.
 
     Parameters
     ----------
     R : array-like or scipy.sparse matrix of shape (n, dim)
         Matrix whose rows generate the cone. Requires rank(R) = dim (H
-        pointed), as extremal_rays() effectively does.
+        pointed), as exhaustive() effectively does.
     work : int, optional
         Budget in R-matvec equivalents (the dominant cost; one shot = 1,
         one hop = 2). Defaults to 1000.
@@ -215,13 +208,7 @@ def sample_extremal_rays(R: ArrayLike,
         if verbose:
             print(f"  {spent} matvecs: {len(found)} certified")
 
-    # per-walker state (height h, slacks u, tight row, pursued target, legs
-    # since retarget). tight < 0 marks a walker shooting from h0. With
-    # targeted=True a walker keeps ONE target and slides toward it -- each
-    # leg moves along -r_target projected tangent to the blocking facet, so
-    # the target's slack strictly decreases across hops (projected descent
-    # of r_target . h over the facet graph) until the target goes tight or
-    # the pursuit is abandoned after `stall` legs.
+    # per-walker state; tight < 0 marks a walker shooting from h0
     m = n_walkers
     H = np.tile(h0[:, None], (1, m))
     S = np.tile(u0[:, None], (1, m))
@@ -243,8 +230,8 @@ def sample_extremal_rays(R: ArrayLike,
     retarget(np.ones(m, dtype=bool))
 
     while spent < work:
-        # leg 1: pursue the target (or random direction) tangent to the
-        # current facet; restarting walkers shoot straight from h0
+        progressed = np.zeros(m, dtype=bool)
+        # leg 1: step tangent to the facet; fresh walkers shoot from h0
         G = rng.standard_normal((d, m))
         has_t = target >= 0
         if has_t.any():
@@ -274,8 +261,7 @@ def sample_extremal_rays(R: ArrayLike,
             found.add(int(rows[k]))
         tight = np.where(landed, rows, tight)
 
-        # leg 2: walkers at a ridge (i, j) step into facet j's interior,
-        # along r_i projected tangent to r_j (leaves j tight, frees i)
+        # leg 2: at a ridge (i, j), step into facet j's interior
         ridge = ok & on_facet
         if ridge.any():
             kk = np.flatnonzero(ridge)
@@ -295,11 +281,11 @@ def sample_extremal_rays(R: ArrayLike,
             for j in j_rows:
                 found.add(int(j))
             tight[kk] = j_rows
-            stalled[kk] = np.where(new, -1, stalled[kk])  # progress: reprieve
+            progressed[kk[new]] = True
 
-        # bookkeeping on pursuits: reached or already-certified targets get
-        # fresh ones; hopeless pursuits are abandoned (teleport + retarget)
+        # retarget caught pursuits; abandon hopeless ones
         stalled += 1
+        stalled[progressed] = 0
         caught = has_t & np.isin(target, np.fromiter(found, dtype=int))
         retarget(caught)
         give_up = ~ok | (stalled > stall)
@@ -310,8 +296,7 @@ def sample_extremal_rays(R: ArrayLike,
             retarget(give_up)
             stalled[give_up] = 0
 
-        # keep magnitudes tame (heights are projective) and refresh the
-        # incrementally-updated slacks periodically against float drift
+        # rescale (heights are projective); refresh slacks against drift
         scale = np.abs(H).max(axis=0)
         H /= scale
         S /= scale

@@ -30,18 +30,20 @@ Dependencies: numpy, scipy, highspy. Run the tests (includes brute-force cross-c
 
 ```python
 import numpy as np
-from extremal_rays import extremal_rays, verify_extremal_rays
+from extremal_rays import exhaustive, sample, verify
 
 R = np.load("rays.npy")          # (n, d) generators, integer or float
-idx = extremal_rays(R)           # indices of the minimal generating subset
+idx = exhaustive(R)              # indices of the minimal generating subset
 ext = R[idx]
 
-ok, report = verify_extremal_rays(R, idx)   # optional certificate audit
+ok, report = verify(R, idx)      # optional certificate audit
+
+some, curve = sample(R, work=5000)   # cheap certified subset (no completeness)
 ```
 
 Integer input enables exact primitive-vector deduplication and an exact rational fallback in cleanup. Duplicate directions collapse to their first occurrence. A wall-time breakdown of the last call is stored in `extremal_rays.core.LAST_PROFILE`.
 
-For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapshots of the confirmed set (verdicts stay exact; rare separation failures are re-resolved serially), and `checkpoint="state.npz"` saves state atomically every minute -- rerunning the same call resumes from the last checkpoint, guarded by a fingerprint of the input rays. Candidate *order* matters for speed: the separation oracle warm-starts between consecutive LPs, so orderings that keep similar rays adjacent run far faster than shuffled input (the default `sort_candidates=True` lexsorts internally; on the benchmark cone, shuffled input without it ran > 78 min vs 20.7 s with it).
+For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapshots of the confirmed set (verdicts stay exact; rare separation failures are re-resolved serially), and `checkpoint="state.npz"` saves state atomically every minute -- rerunning the same call resumes from the last checkpoint, guarded by a fingerprint of the input rays. Candidate *order* matters for speed: the separation oracle warm-starts between consecutive LPs, so orderings that keep similar rays adjacent run far faster than shuffled input. Structured generator order (the common case) is typically best and is kept by default; for unstructured input pass `sort_candidates=True` to lexsort internally -- on the benchmark cone, shuffled input ran > 78 min without it vs 20.7 s with it.
 
 ## Algorithm Notes
 

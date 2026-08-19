@@ -33,10 +33,10 @@ from scipy.optimize import linprog
 from .core import positive_functional, _unique_primitive, _SeparationOracle
 
 
-def verify_extremal_rays(R: ArrayLike,
-                         ext_indices: ArrayLike,
-                         tol: float = 1e-6,
-                         verbose: bool = False) -> "tuple[bool, dict]":
+def verify(R: ArrayLike,
+           ext_indices: ArrayLike,
+           tol: float = 1e-6,
+           verbose: bool = False) -> "tuple[bool, dict]":
     """
     Check that R[ext_indices] is a minimal generating set for cone(R).
 
@@ -96,12 +96,12 @@ def verify_extremal_rays(R: ArrayLike,
             bounds=[(0, None)],
             method="highs",
         )
-        resid = float(np.abs(E.T @ res.x - P[k]).max()) if res.success else np.inf
+        resid = (float(np.abs(E.T @ res.x - P[k]).max())
+                 if res.success else np.inf)
         worst_resid = max(worst_resid, resid)
         if not (res.success and resid < tol):
-            failures.append(
-                f"ray {rep[k]}: no membership certificate (residual {resid:.2e})"
-            )
+            failures.append(f"ray {rep[k]}: no membership certificate "
+                            f"(residual {resid:.2e})")
 
     oracle = _SeparationOracle(U.shape[1])
     for e in ext:
