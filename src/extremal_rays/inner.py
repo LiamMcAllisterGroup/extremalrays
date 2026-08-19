@@ -134,9 +134,10 @@ def sample_extremal_rays(R: ArrayLike,
 
     Works in the dual cone H = {h : R h >= 0} and certifies a ray by
     exhibiting a height at which exactly its row is tight (a supporting
-    hyperplane touching only that ray). Cannot prove completeness -- use
-    extremal_rays() for the full answer; this is for cheap lower bounds and
-    for seeding.
+    hyperplane touching only that ray). Cannot prove completeness, has
+    no reliable coverage estimate, and saturates below the full set -- use
+    extremal_rays() whenever the deliverable is THE extremal rays; this is
+    for cheaply picking off certified rays when any witness will do.
 
     Walkers land on a facet by ray shooting from an interior point, then
     hop facet-to-facet: move tangentially to the current facet until a

@@ -541,7 +541,8 @@ def extremal_rays(R: ArrayLike,
                   rng_seed: int = 0,
                   n_workers: int = 0,
                   checkpoint: "str | None" = None,
-                  sort_candidates: bool = True) -> np.ndarray:
+                  sort_candidates: bool = True,
+                  known: "ArrayLike | None" = None) -> np.ndarray:
     """
     Indices of a minimal generating subset of the rays R of a pointed cone.
 
@@ -595,6 +596,12 @@ def extremal_rays(R: ArrayLike,
         order, keeping similar rays adjacent so the oracle's warm starts
         pay off (measured up to ~10x on shuffled input). The returned
         indices are unaffected. Defaults to True.
+    known : array-like of int | None, optional
+        Indices into R of rays already certified extremal, preloaded into
+        the confirmed set. Almost always None: certified rays are rarely
+        in hand at onset (see the note above). Wrong entries corrupt the
+        result -- pass only certificate-backed indices. Ignored on
+        checkpoint resume. Defaults to None.
 
     Returns
     -------
@@ -610,6 +617,15 @@ def extremal_rays(R: ArrayLike,
     Notes
     -----
     A wall-time breakdown of the call is stored in ``core.LAST_PROFILE``.
+
+    Certified extremal rays are almost never in hand at the onset of a
+    computation, so `known` should almost always be left None. It exists
+    for the rare resume-like cases where they exist anyway (a prior run on
+    the same cone, an interrupted job). It is NOT a speed play: one
+    preloaded ray spares the sweep about one discovery (~1 extra
+    separation LP + ray shoot), capping the saving near n_extremal/n of
+    the total, so sampling rays first just to seed costs more than it
+    saves.
 
     Candidate ORDER matters for speed: the oracle warm-starts between
     consecutive LPs, so orderings that keep similar rays adjacent (e.g.
@@ -701,6 +717,21 @@ def extremal_rays(R: ArrayLike,
                        suspects=np.array([suspect[j] for j in E], dtype=bool),
                        fingerprint=np.array(fp))
 
+    # --- known extremal rays (e.g. from sample_extremal_rays) join E
+    # directly; their unique-tight certificates meet the same standard that
+    # exempts untied shots from cleanup, so they are not marked suspect
+    if known is not None and not resumed:
+        inv = {int(r): j for j, r in enumerate(rep)}
+        for k in np.asarray(known, dtype=int):
+            j = inv.get(int(k))
+            if j is None:
+                raise ValueError(f"known index {int(k)} is not a "
+                                 "representative row (duplicate or zero?)")
+            if status[j] == 0:
+                confirm(j, False)
+        if verbose:
+            print(f"known: {len(E)} extremal rays preloaded")
+
     # --- seeding: argmaxes of random functionals are vertices; no LPs needed
     if seed_shots == "auto":
         seed_shots = min(2 * d, n)
@@ -714,7 +745,8 @@ def extremal_rays(R: ArrayLike,
             j, tied = _shoot(P, C[:, k], all_idx)
             hits[j] = hits.get(j, True) and tied
         for j in sorted(hits):
-            confirm(j, hits[j])
+            if status[j] == 0:  # may already be in E via `known`
+                confirm(j, hits[j])
         if verbose:
             print(f"seeding: {len(E)} extremal rays from {seed_shots} shots")
     prof["seeding"] = time.perf_counter() - t0

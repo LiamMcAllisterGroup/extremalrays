@@ -285,3 +285,12 @@ def test_sample_deterministic():
     a, ca = sample_extremal_rays(R, work=300, rng_seed=3)
     b, cb = sample_extremal_rays(R, work=300, rng_seed=3)
     assert a.tolist() == b.tolist() and (ca == cb).all()
+
+
+def test_known_seeds_reproduce_answer():
+    R = _random_pointed_rays(6, n=60, d=5)
+    full = extremal_rays(R)
+    seeds, _ = sample_extremal_rays(R, work=200)
+    assert len(seeds) > 0
+    idx = extremal_rays(R, known=seeds)
+    assert idx.tolist() == full.tolist()
