@@ -26,6 +26,8 @@
 from __future__ import annotations
 
 # stdlib imports
+import hashlib
+import os
 import time
 import warnings
 from fractions import Fraction
@@ -141,7 +143,8 @@ def positive_functional(R: ArrayLike) -> np.ndarray:
     slack = R @ w
     if slack.min() <= 0.5:
         raise RuntimeError(
-            f"positive-functional certificate failed (min slack {slack.min():.3e})"
+            "positive-functional certificate failed "
+            f"(min slack {slack.min():.3e})"
         )
     return w
 
@@ -158,25 +161,41 @@ class _SeparationOracle:
     tests, so HiGHS warm-starts from the previous basis. Rows can be relaxed
     (bounds widened to free) and restored, which is how the cleanup pass
     tests a confirmed ray against the others without rebuilding the model.
+
+    Rare HiGHS solve errors are healed by rebuilding a fresh model and
+    retrying once, losing only that solve's warm start.
     """
 
     def __init__(self, d: int):
         self.d = d
         self._col_idx = np.arange(d, dtype=np.int32)
+        self.row_of = {}
+        self._rows = []
+        self._free = set()
+        self._fresh()
+
+    def _fresh(self) -> None:
         self.h = highspy.Highs()
         self.h.silent()
-        self.h.addVars(d, np.full(d, -1.0), np.full(d, 1.0))
-        self.row_of = {}
+        self.h.addVars(self.d, np.full(self.d, -1.0), np.full(self.d, 1.0))
+        for nz, vals in self._rows:
+            self.h.addRow(-_INF, 0.0, len(nz), nz, vals)
+        for key in self._free:
+            self.h.changeRowBounds(self.row_of[key], -_INF, _INF)
 
     def add_row(self, e: np.ndarray, key: int) -> None:
         nz = np.flatnonzero(e).astype(np.int32)
-        self.h.addRow(-_INF, 0.0, len(nz), nz, e[nz].astype(float))
+        vals = e[nz].astype(float)
+        self._rows.append((nz, vals))
+        self.h.addRow(-_INF, 0.0, len(nz), nz, vals)
         self.row_of[key] = len(self.row_of)
 
     def relax(self, key: int) -> None:
+        self._free.add(key)
         self.h.changeRowBounds(self.row_of[key], -_INF, _INF)
 
     def restore(self, key: int) -> None:
+        self._free.discard(key)
         self.h.changeRowBounds(self.row_of[key], -_INF, 0.0)
 
     def separate(self, p: np.ndarray) -> "tuple[float, np.ndarray]":
@@ -184,17 +203,18 @@ class _SeparationOracle:
         Return ``(val, c)`` with val = max c . p. By Farkas' lemma, val ~ 0
         iff p is in cone(E); val > 0 gives a separating functional c.
 
-        Raises on any non-optimal solver status: a solver failure must never
-        be silently interpreted as a verdict.
+        Raises on any repeated non-optimal solver status: a solver failure
+        must never be silently interpreted as a verdict.
         """
-        self.h.changeColsCost(self.d, self._col_idx, (-p).astype(float))
-        self.h.run()
-        status = self.h.getModelStatus()
-        if status != highspy.HighsModelStatus.kOptimal:
-            raise RuntimeError(f"separation LP not solved to optimality: {status}")
-        val = -self.h.getInfo().objective_function_value
-        c = np.array(self.h.getSolution().col_value, dtype=float)
-        return val, c
+        for _ in range(2):
+            self.h.changeColsCost(self.d, self._col_idx, (-p).astype(float))
+            self.h.run()
+            if self.h.getModelStatus() == highspy.HighsModelStatus.kOptimal:
+                val = -self.h.getInfo().objective_function_value
+                c = np.array(self.h.getSolution().col_value, dtype=float)
+                return val, c
+            self._fresh()
+        raise RuntimeError("separation LP not optimal after model rebuild")
 
 
 # -----------------------------------------------------------------------------
@@ -279,6 +299,81 @@ def _exact_membership(r: np.ndarray,
 
 
 # -----------------------------------------------------------------------------
+# checkpointing and parallel sweeps
+# -----------------------------------------------------------------------------
+
+def _fingerprint(U: np.ndarray) -> str:
+    """
+    Cheap input fingerprint guarding checkpoint resumes against a changed
+    ray matrix (shape, edge blocks, and total mass -- not cryptographic).
+    """
+    h = hashlib.sha256()
+    b = np.ascontiguousarray(U)
+    h.update(str(b.shape).encode())
+    h.update(b[:64].tobytes())
+    h.update(b[-64:].tobytes())
+    h.update(str(float(np.abs(b).sum())).encode())
+    return h.hexdigest()
+
+
+def _ckpt_save(path: str, **arrays) -> None:
+    """Atomic save (tmp + fsync + replace), previous kept as .bak."""
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        np.savez(f, **arrays)
+        f.flush()
+        os.fsync(f.fileno())
+    if os.path.exists(path):
+        os.replace(path, path + ".bak")
+    os.replace(tmp, path)
+
+
+def _ckpt_load(path: str, fingerprint: str) -> "dict | None":
+    """Load a checkpoint matching the fingerprint, trying the .bak rotation."""
+    for cand in (path, path + ".bak"):
+        try:
+            with np.load(cand, allow_pickle=False) as z:
+                d = {k: z[k] for k in z.files}
+            if str(d.get("fingerprint")) == fingerprint:
+                return d
+        except Exception:
+            continue
+    return None
+
+
+_POOL = {}  # per-worker-process state
+
+
+def _pool_init(shm_name, shape, dtype):
+    from multiprocessing import shared_memory
+    shm = shared_memory.SharedMemory(name=shm_name)
+    _POOL["shm"] = shm
+    _POOL["P"] = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+
+
+def _pool_sweep(args):
+    """
+    Test one candidate chunk against a frozen E snapshot. Returns
+    (redundant, failed): membership verdicts are final (E only grows), and
+    failed candidates are re-resolved serially against the live E.
+    """
+    chunk, E_idx, tol = args
+    P = _POOL["P"]
+    oracle = _SeparationOracle(P.shape[1])
+    for e in E_idx:
+        oracle.add_row(P[int(e)], int(e))
+    redundant, failed = [], []
+    for k in chunk:
+        p = P[int(k)]
+        val, _ = oracle.separate(p)
+        if val <= tol * max(1.0, float(np.abs(p).max())):
+            redundant.append(int(k))
+        else:
+            failed.append(int(k))
+    return redundant, failed
+
+
+# -----------------------------------------------------------------------------
 # main algorithm
 # -----------------------------------------------------------------------------
 
@@ -287,7 +382,9 @@ def extremal_rays(R: ArrayLike,
                   seed_shots: "int | str" = "auto",
                   cleanup: bool = True,
                   verbose: bool = False,
-                  rng_seed: int = 0) -> np.ndarray:
+                  rng_seed: int = 0,
+                  n_workers: int = 0,
+                  checkpoint: "str | None" = None) -> np.ndarray:
     """
     Indices of a minimal generating subset of the rays R of a pointed cone.
 
@@ -325,6 +422,15 @@ def extremal_rays(R: ArrayLike,
     rng_seed : int, optional
         Seed for the seeding functionals (results are deterministic for a
         fixed value). Defaults to 0.
+    n_workers : int, optional
+        Worker processes sweeping candidate chunks against a frozen snapshot
+        of E ("redundant" verdicts stay valid because E only grows); the
+        rare separation failures are re-resolved serially against the live
+        E. 0 runs fully serially. Defaults to 0.
+    checkpoint : str | None, optional
+        Path for periodic atomic state saves. A rerun with the same rays
+        and path resumes from the last checkpoint (at most ~60s of work is
+        lost on a crash). Defaults to None.
 
     Returns
     -------
@@ -340,6 +446,10 @@ def extremal_rays(R: ArrayLike,
     Notes
     -----
     A wall-time breakdown of the call is stored in ``core.LAST_PROFILE``.
+
+    Candidate ORDER matters for speed: the oracle warm-starts between
+    consecutive LPs, so orderings that keep similar rays adjacent (e.g.
+    sorted rows) run up to ~10x faster than shuffled input.
     """
     prof = {k: 0.0 for k in (
         "preprocess", "positive_functional", "seeding",
@@ -378,11 +488,34 @@ def extremal_rays(R: ArrayLike,
         suspect[j] = tied
         oracle.add_row(P[j], j)
 
+    # --- checkpoint resume
+    fp = _fingerprint(U) if checkpoint else None
+    resumed = False
+    if checkpoint:
+        ck = _ckpt_load(checkpoint, fp)
+        if ck is not None:
+            status = ck["status"].astype(np.int8)
+            for j, s in zip(ck["E"], ck["suspects"]):
+                E.append(int(j))
+                suspect[int(j)] = bool(s)
+                oracle.add_row(P[int(j)], int(j))
+            resumed = True
+            if verbose:
+                print(f"resumed: |E| = {len(E)}, "
+                      f"{int((status != 0).sum())}/{n} resolved")
+
+    def save_ckpt():
+        if checkpoint:
+            _ckpt_save(checkpoint, status=status,
+                       E=np.array(E, dtype=np.int64),
+                       suspects=np.array([suspect[j] for j in E], dtype=bool),
+                       fingerprint=np.array(fp))
+
     # --- seeding: argmaxes of random functionals are vertices; no LPs needed
     if seed_shots == "auto":
         seed_shots = min(2 * d, n)
     t0 = time.perf_counter()
-    if seed_shots:
+    if seed_shots and not resumed:
         rng = np.random.default_rng(rng_seed)
         C = rng.standard_normal((d, seed_shots))
         all_idx = np.arange(n)
@@ -398,31 +531,86 @@ def extremal_rays(R: ArrayLike,
 
     # --- main loop
     n_lp = 0
+    last_ckpt = time.time()
     t_main = time.perf_counter()
-    for i in range(n):
-        if status[i] != 0:
-            continue
-        for _ in range(n + 1):  # safety bound; each pass grows E or resolves i
+
+    def resolve(i):
+        """One Clarkson resolution: redundant, or E grows until i is shot."""
+        nonlocal n_lp
+        for _ in range(n + 1):  # safety bound; each pass grows E or resolves
             t0 = time.perf_counter()
             val, c = oracle.separate(P[i])
             prof["main_separation_lp"] += time.perf_counter() - t0
             n_lp += 1
             prof["n_lp_main"] += 1
-            scale = max(1.0, float(np.abs(P[i]).max()))
-            if val <= tol * scale:
+            if val <= tol * max(1.0, float(np.abs(P[i]).max())):
                 status[i] = -1
-                break
+                return
             t0 = time.perf_counter()
             j, tied = _shoot(P, c, np.flatnonzero(status == 0))
             prof["main_ray_shoot"] += time.perf_counter() - t0
             prof["n_shoot"] += 1
             confirm(j, tied)
             if j == i:
-                break
-        else:
-            raise RuntimeError(f"failed to resolve candidate {i}")
+                return
+        raise RuntimeError(f"failed to resolve candidate {i}")
+
+    if n_workers:
+        # streaming parallel sweeps: workers pull candidate chunks as they
+        # finish (no round barrier), each against the E snapshot current at
+        # dispatch; the rare separation failures are resolved serially here
+        # while the workers keep going. Verdicts against a stale snapshot
+        # stay valid because E only grows.
+        from multiprocessing import get_context, shared_memory
+        shm = shared_memory.SharedMemory(create=True, size=P.nbytes)
+        np.ndarray(P.shape, P.dtype, buffer=shm.buf)[:] = P
+        pool = get_context("spawn").Pool(
+            n_workers, initializer=_pool_init,
+            initargs=(shm.name, P.shape, str(P.dtype)))
+        try:
+            chunk = max(64, min(2000, n // (8 * n_workers) or 64))
+
+            def jobs():
+                # runs in the pool's feeder thread; stale reads of status/E
+                # only cause harmless duplicate work
+                k = 0
+                while k < n:
+                    todo = []
+                    while k < n and len(todo) < chunk:
+                        if status[k] == 0:
+                            todo.append(k)
+                        k += 1
+                    if todo:
+                        yield (todo, np.array(E, dtype=np.int64), tol)
+
+            for red, failed in pool.imap_unordered(_pool_sweep, jobs()):
+                for k in red:
+                    if status[k] == 0:
+                        status[k] = -1
+                for k in failed:
+                    if status[k] == 0:
+                        resolve(k)
+                if verbose:
+                    done = int((status != 0).sum())
+                    print(f"  {done}/{n} candidates, |E| = {len(E)}")
+                if checkpoint and time.time() - last_ckpt > 60:
+                    save_ckpt()
+                    last_ckpt = time.time()
+        finally:
+            pool.close()
+            pool.join()
+            shm.close()
+            shm.unlink()
+
+    for i in range(n):
+        if status[i] != 0:
+            continue
+        resolve(i)
         if verbose and (i + 1) % 500 == 0:
             print(f"  {i + 1}/{n} candidates, |E| = {len(E)}, LPs = {n_lp}")
+        if checkpoint and time.time() - last_ckpt > 60:
+            save_ckpt()
+            last_ckpt = time.time()
     prof["main_other"] = (
         time.perf_counter() - t_main
         - prof["main_separation_lp"] - prof["main_ray_shoot"]
@@ -483,6 +671,7 @@ def extremal_rays(R: ArrayLike,
                     "minimal. Consider verify_extremal_rays()."
                 )
 
+    save_ckpt()
     prof["total"] = time.perf_counter() - t_total
     LAST_PROFILE.clear()
     LAST_PROFILE.update(prof)

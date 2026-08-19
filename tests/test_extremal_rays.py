@@ -153,3 +153,49 @@ def test_verify_catches_wrong_answers():
     # correct answer
     ok, _ = verify_extremal_rays(R, [0, 2])
     assert ok
+
+
+def _random_pointed_rays(seed, n=40, d=4):
+    rng = np.random.default_rng(seed)
+    R = np.column_stack(
+        [rng.integers(1, 6, n), rng.integers(-5, 6, (n, d - 1))]
+    )
+    g = np.gcd.reduce(np.abs(R), axis=1)
+    return np.unique(R // g[:, None], axis=0)
+
+
+@pytest.mark.parametrize("trial", range(3))
+def test_parallel_matches_serial(trial):
+    R = _random_pointed_rays(trial)
+    a = extremal_rays(R)
+    b = extremal_rays(R, n_workers=2)
+    assert a.tolist() == b.tolist()
+
+
+def test_parallel_tie_stress():
+    R = [(1, i, j) for i in range(5) for j in range(5)]
+    idx = extremal_rays(R, n_workers=2)
+    corners = sorted(
+        k for k, (_, i, j) in enumerate(R) if i in (0, 4) and j in (0, 4)
+    )
+    assert sorted(idx) == corners
+
+
+def test_checkpoint_resume(tmp_path):
+    R = _random_pointed_rays(7)
+    ck = str(tmp_path / "state.npz")
+    a = extremal_rays(R, checkpoint=ck)
+    assert (tmp_path / "state.npz").exists()
+    # rerun resumes the completed state and reproduces the result
+    b = extremal_rays(R, checkpoint=ck)
+    assert a.tolist() == b.tolist()
+
+
+def test_checkpoint_fingerprint_guard(tmp_path):
+    ck = str(tmp_path / "state.npz")
+    R1 = _random_pointed_rays(1)
+    extremal_rays(R1, checkpoint=ck)
+    # different rays with the same path must not resume the stale state
+    R2 = _random_pointed_rays(2)
+    idx = extremal_rays(R2, checkpoint=ck)
+    assert idx.tolist() == extremal_rays(R2).tolist()

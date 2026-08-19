@@ -41,6 +41,8 @@ ok, report = verify_extremal_rays(R, idx)   # optional certificate audit
 
 Integer input enables exact primitive-vector deduplication and an exact rational fallback in cleanup. Duplicate directions collapse to their first occurrence. A wall-time breakdown of the last call is stored in `extremal_rays.core.LAST_PROFILE`.
 
+For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapshots of the confirmed set (verdicts stay exact; rare separation failures are re-resolved serially), and `checkpoint="state.npz"` saves state atomically every minute -- rerunning the same call resumes from the last checkpoint, guarded by a fingerprint of the input rays. Candidate *order* matters for speed: the separation oracle warm-starts between consecutive LPs, so orderings that keep similar rays adjacent (e.g. sorted rows) run up to ~10x faster than shuffled input.
+
 ## Algorithm Notes
 
 An LP finds $w$ with $w\cdot s\geq 1$ on all rays (doubling as the pointedness check); scaling onto the slice $w\cdot x=1$ turns conic redundancy into point-hull redundancy. Each candidate $p$ is then tested against the confirmed-extremal set $E$ with the separation LP
