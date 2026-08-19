@@ -47,6 +47,11 @@ LAST_PROFILE: dict = {}
 _CKPT_HINT_DELAY = 30.0      # seconds of sweeping before estimating
 _CKPT_HINT_REMAINING = 600.0  # warn if this much work remains uncheckpointed
 
+_CG_THRESHOLD = 200_000  # rows above which the pointedness LP uses
+                         # constraint generation (direct HiGHS fails there)
+_CG_BATCH = 8            # subset and growth size, in multiples of dim
+_CG_ROUNDS = 60          # rounds before giving up (suggest w=)
+
 
 # -----------------------------------------------------------------------------
 # preprocessing
@@ -242,6 +247,44 @@ def positive_functional(R: ArrayLike) -> np.ndarray:
     if not sparse.issparse(R):
         R = np.asarray(R)
     n, d = R.shape
+    if n > _CG_THRESHOLD:
+        # constraint generation: HiGHS fails outright on very tall direct
+        # LPs, but a subset LP plus one full matvec of verification per
+        # round stays exact and fast (an infeasible subsystem certifies
+        # non-pointedness of the whole)
+        rng = np.random.default_rng(0)
+        S = np.sort(rng.choice(n, _CG_BATCH * d, replace=False))
+        for _ in range(_CG_ROUNDS):
+            w = _pf_lp(R[S])
+            m = R @ w
+            if m.min() > 0:
+                return w / m.min()  # rescale: R @ w >= 1 everywhere
+            worst = np.argpartition(m, _CG_BATCH * d)[:_CG_BATCH * d]
+            S = np.union1d(S, worst[m[worst] < 1])
+        raise RuntimeError(
+            f"constraint generation did not converge in {_CG_ROUNDS} "
+            "rounds; if a positive functional is known, pass it via w="
+        )
+    w = _pf_lp(R)
+    slack = R @ w
+    if slack.min() <= 0.5:
+        raise RuntimeError(
+            "positive-functional certificate failed "
+            f"(min slack {slack.min():.3e})"
+        )
+    return w
+
+
+def _pf_lp(R) -> np.ndarray:
+    """The direct LP behind positive_functional: min sum(R w), R w >= 1."""
+    n, d = R.shape
+    # positivity is row-scale-free, so unit rows keep HiGHS conditioned
+    # even when coefficients span many orders of magnitude
+    if sparse.issparse(R):
+        norms = np.sqrt(np.asarray(R.multiply(R).sum(axis=1)).ravel())
+        R = sparse.diags(1.0 / norms) @ R
+    else:
+        R = R / np.linalg.norm(R, axis=1)[:, None]
     # minimizing sum(R @ w) keeps w tame; any feasible w would do
     res = linprog(
         c=np.asarray(R.sum(axis=0), dtype=float).ravel(),
@@ -250,19 +293,17 @@ def positive_functional(R: ArrayLike) -> np.ndarray:
         bounds=[(None, None)] * d,
         method="highs",
     )
-    if not res.success:
+    if res.status == 2:
         raise ValueError(
             "Cone is not pointed (no functional is strictly positive on all "
             "rays). Decompose into lineality space + pointed quotient first."
         )
-    w = res.x
-    slack = R @ w
-    if slack.min() <= 0.5:
+    if not res.success:  # solver failure is not an infeasibility verdict
         raise RuntimeError(
-            "positive-functional certificate failed "
-            f"(min slack {slack.min():.3e})"
+            f"pointedness LP failed (status {res.status}: {res.message}); "
+            "if a positive functional is known, pass it via w="
         )
-    return w
+    return res.x
 
 
 # -----------------------------------------------------------------------------
@@ -535,12 +576,13 @@ def exhaustive(R: ArrayLike,
                   tol: float = 1e-7,
                   seed_shots: "int | str" = "auto",
                   cleanup: bool = True,
-                  verbose: bool = False,
+                  verbosity: int = 0,
                   rng_seed: int = 0,
                   n_workers: int = 0,
                   checkpoint: "str | None" = None,
                   sort_candidates: bool = False,
-                  known: "ArrayLike | None" = None) -> np.ndarray:
+                  known: "ArrayLike | None" = None,
+                  w: "ArrayLike | None" = None) -> np.ndarray:
     """
     Indices of a minimal generating subset of the rays R of a pointed cone.
 
@@ -575,8 +617,8 @@ def exhaustive(R: ArrayLike,
         True unless a slightly non-minimal generating set is acceptable.
         Rays admitted as the unique maximizer of some functional are
         provably extremal and skip the retest. Defaults to True.
-    verbose : bool, optional
-        Whether to print progress. Defaults to False.
+    verbosity : int, optional
+        The verbosity level. Defaults to 0.
     rng_seed : int, optional
         Seed for the seeding functionals (results are deterministic for a
         fixed value). Defaults to 0.
@@ -605,6 +647,12 @@ def exhaustive(R: ArrayLike,
         ray spares about one LP, capping the saving near n_extremal/n).
         Wrong entries corrupt the result. Ignored on checkpoint resume.
         Defaults to None.
+    w : array-like | None, optional
+        A functional with w . r > 0 for every ray, when one is known
+        structurally (e.g. from a compact description of the dual cone).
+        Verified exactly with one matvec and rescaled, skipping the
+        pointedness LP -- at 10M rays that LP dwarfs it. An invalid w
+        raises. Defaults to None, which solves the LP.
 
     Returns
     -------
@@ -664,7 +712,15 @@ def exhaustive(R: ArrayLike,
     prof["preprocess"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    w = positive_functional(U)
+    if w is not None:
+        w = np.asarray(w, dtype=float)
+        margins = U @ w
+        if margins.min() <= 0:
+            raise ValueError("supplied w is not positive on every ray "
+                             f"(min margin {margins.min():.3e})")
+        w = w / margins.min()  # rescale so U @ w >= 1, matching the LP
+    else:
+        w = positive_functional(U)
     if is_sparse:
         P = sparse.diags(1.0 / (U @ w)) @ U
         P.sort_indices()
@@ -696,7 +752,7 @@ def exhaustive(R: ArrayLike,
                 suspect[int(j)] = bool(s)
                 oracle.add_row(_row(P, int(j)), int(j))
             resumed = True
-            if verbose:
+            if verbosity >= 1:
                 print(f"resumed: |E| = {len(E)}, "
                       f"{int((status != 0).sum())}/{n} resolved")
 
@@ -717,7 +773,7 @@ def exhaustive(R: ArrayLike,
                                  "representative row (duplicate or zero?)")
             if status[j] == 0:
                 confirm(j, False)
-        if verbose:
+        if verbosity >= 1:
             print(f"known: {len(E)} extremal rays preloaded")
 
     # --- seeding: argmaxes of random functionals are vertices; no LPs needed
@@ -735,7 +791,7 @@ def exhaustive(R: ArrayLike,
         for j in sorted(hits):
             if status[j] == 0:  # may already be in E via `known`
                 confirm(j, hits[j])
-        if verbose:
+        if verbosity >= 1:
             print(f"seeding: {len(E)} extremal rays from {seed_shots} shots")
     prof["seeding"] = time.perf_counter() - t0
 
@@ -813,7 +869,7 @@ def exhaustive(R: ArrayLike,
                     if status[k] == 0:
                         resolve(k)
                 hint()
-                if verbose:
+                if verbosity >= 1:
                     done = int((status != 0).sum())
                     print(f"  {done}/{n} candidates, |E| = {len(E)}")
                 if checkpoint and time.time() - last_ckpt > 60:
@@ -831,7 +887,7 @@ def exhaustive(R: ArrayLike,
             continue
         resolve(i)
         hint()
-        if verbose and (i + 1) % 500 == 0:
+        if verbosity >= 1 and (i + 1) % 500 == 0:
             print(f"  {i + 1}/{n} candidates, |E| = {len(E)}, LPs = {n_lp}")
         if checkpoint and time.time() - last_ckpt > 60:
             save_ckpt()
@@ -847,7 +903,7 @@ def exhaustive(R: ArrayLike,
     if cleanup:
         suspects = [e for e in sorted(E) if suspect.get(e, True)]
         prof["n_suspects"] = len(suspects)
-        if verbose:
+        if verbosity >= 1:
             print(f"cleanup: {len(suspects)}/{len(E)} rays were tie-admitted")
         for e in suspects:
             others = [x for x in E if x != e]
@@ -887,7 +943,7 @@ def exhaustive(R: ArrayLike,
             if certified:
                 E.remove(e)
                 status[e] = -1
-                if verbose:
+                if verbosity >= 1:
                     print(f"  cleanup: removed redundant ray {e}")
             else:
                 oracle.restore(e)
@@ -902,6 +958,6 @@ def exhaustive(R: ArrayLike,
     prof["total"] = time.perf_counter() - t_total
     LAST_PROFILE.clear()
     LAST_PROFILE.update(prof)
-    if verbose:
+    if verbosity >= 1:
         print(f"done: {len(E)} extremal rays, {n_lp} LPs")
     return np.sort(rep[sorted(E)])

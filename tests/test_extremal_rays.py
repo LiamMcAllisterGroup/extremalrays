@@ -28,7 +28,7 @@ from scipy.optimize import linprog
 from scipy.sparse import csr_matrix
 
 # local imports
-from extremal_rays import exhaustive, verify
+from extremal_rays import exhaustive, sample, verify
 
 
 def brute_force(R):
@@ -260,8 +260,6 @@ def test_sparse_non_pointed_raises():
         exhaustive(R)
 
 
-from extremal_rays import sample
-
 
 def test_sample_is_certified_subset():
     R = _random_pointed_rays(4, n=60, d=5)
@@ -303,3 +301,37 @@ def test_checkpoint_hint_warns(monkeypatch):
     R = _random_pointed_rays(3, n=40, d=4)
     with pytest.warns(UserWarning, match="checkpoint"):
         exhaustive(R)
+
+
+def test_supplied_w_matches_lp_path():
+    R = _random_pointed_rays(5, n=50, d=4)
+    idx = exhaustive(R, w=[1, 0, 0, 0])  # valid: first coordinate >= 1
+    assert idx.tolist() == exhaustive(R).tolist()
+    with pytest.raises(ValueError, match="not positive"):
+        exhaustive(R, w=[0, 1, 0, 0])
+
+
+def test_constraint_generation_matches_direct(monkeypatch):
+    from extremal_rays import core, positive_functional
+    R = _random_pointed_rays(12, n=400, d=5)
+    monkeypatch.setattr(core, "_CG_THRESHOLD", 100)
+    w = positive_functional(R)
+    assert (R @ w).min() > 0.5
+    assert exhaustive(R).tolist() == exhaustive(csr_matrix(R)).tolist()
+
+
+def test_constraint_generation_not_pointed(monkeypatch):
+    from extremal_rays import core
+    monkeypatch.setattr(core, "_CG_THRESHOLD", 10)
+    R = np.vstack([_random_pointed_rays(1, n=30, d=4),
+                   -_random_pointed_rays(1, n=30, d=4)])
+    with pytest.raises(ValueError, match="not pointed"):
+        exhaustive(R)
+
+
+def test_sample_margin_center_cg(monkeypatch):
+    from extremal_rays import core
+    monkeypatch.setattr(core, "_CG_THRESHOLD", 20)
+    R = _random_pointed_rays(13, n=80, d=4)
+    idx, _ = sample(R, work=300)
+    assert set(idx.tolist()) <= set(exhaustive(R).tolist())

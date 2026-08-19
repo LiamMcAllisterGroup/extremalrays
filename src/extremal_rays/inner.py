@@ -41,23 +41,46 @@ def _margin_center(U) -> np.ndarray:
     """
     An interior point of {h : U h >= 0} maximizing the minimum
     row-norm-relative slack over the box |h| <= 1 (fairer angular sampling
-    than positive_functional's min-sum point).
+    than positive_functional's min-sum point). Tall inputs go through
+    constraint generation: a subset LP per round, verified against all
+    rows by one matvec (direct HiGHS fails on very tall LPs).
     """
+    from .core import _CG_BATCH, _CG_ROUNDS, _CG_THRESHOLD
+
     n, d = U.shape
     if sparse.issparse(U):
         norms = np.sqrt(np.asarray(U.multiply(U).sum(axis=1)).ravel())
-        A = sparse.hstack([-U, sparse.csr_matrix(norms[:, None])])
     else:
         norms = np.linalg.norm(U, axis=1)
-        A = np.column_stack([-U, norms])
-    c = np.zeros(d + 1)
-    c[-1] = -1.0
-    res = linprog(c=c, A_ub=A, b_ub=np.zeros(n),
-                  bounds=[(-1, 1)] * d + [(0, None)], method="highs")
-    if not res.success or res.x[-1] <= 0:
-        raise ValueError("no interior point: cone(R) is not full-dimensional"
-                         " or not pointed")
-    return res.x[:-1]
+
+    def solve(idx):
+        Ui, ni = U[idx], norms[idx]
+        if sparse.issparse(Ui):
+            A = sparse.hstack([-Ui, sparse.csr_matrix(ni[:, None])])
+        else:
+            A = np.column_stack([-Ui, ni])
+        c = np.zeros(d + 1)
+        c[-1] = -1.0
+        res = linprog(c=c, A_ub=A, b_ub=np.zeros(len(idx)),
+                      bounds=[(-1, 1)] * d + [(0, None)], method="highs")
+        if not res.success or res.x[-1] <= 0:
+            raise ValueError("no interior point: cone(R) is not "
+                             "full-dimensional or not pointed")
+        return res.x[:-1], res.x[-1]
+
+    if n <= _CG_THRESHOLD:
+        return solve(np.arange(n))[0]
+    rng = np.random.default_rng(0)
+    S = np.sort(rng.choice(n, _CG_BATCH * d, replace=False))
+    for _ in range(_CG_ROUNDS):
+        h, t = solve(S)
+        m = (U @ h) / norms
+        if m.min() > 0:
+            return h
+        worst = np.argpartition(m, _CG_BATCH * d)[:_CG_BATCH * d]
+        S = np.union1d(S, worst[m[worst] < t])
+    raise RuntimeError(f"margin-center constraint generation did not "
+                       f"converge in {_CG_ROUNDS} rounds")
 
 
 def _exit_times(u: np.ndarray, W: np.ndarray) -> np.ndarray:
@@ -123,7 +146,7 @@ def sample(R: ArrayLike,
                          jitter: float = 0.1,
                          tie_tol: float = 1e-7,
                          rng_seed: int = 0,
-                         verbose: bool = False,
+                         verbosity: int = 0,
                          ) -> "tuple[np.ndarray, np.ndarray]":
     """
     Certified-extremal rays of cone(R), sampled cheaply (an inner bound).
@@ -173,8 +196,8 @@ def sample(R: ArrayLike,
         Defaults to 1e-7.
     rng_seed : int, optional
         Seed; results are deterministic for a fixed value. Defaults to 0.
-    verbose : bool, optional
-        Whether to print progress. Defaults to False.
+    verbosity : int, optional
+        The verbosity level. Defaults to 0.
 
     Returns
     -------
@@ -205,7 +228,7 @@ def sample(R: ArrayLike,
 
     def record():
         curve.append((spent, len(found)))
-        if verbose:
+        if verbosity >= 1:
             print(f"  {spent} matvecs: {len(found)} certified")
 
     # per-walker state; tight < 0 marks a walker shooting from h0

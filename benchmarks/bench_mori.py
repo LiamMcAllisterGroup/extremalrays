@@ -47,20 +47,21 @@ def main():
     ap.add_argument("--seed-shots", default="auto",
                     help="'auto', or an integer (0 disables seeding)")
     args = ap.parse_args()
-    seed_shots = args.seed_shots if args.seed_shots == "auto" else int(args.seed_shots)
+    seed_shots = (args.seed_shots if args.seed_shots == "auto"
+                  else int(args.seed_shots))
 
     rays = np.load(DATA)["rays"].astype(np.int64)
     print(f"rays: {rays.shape}")
 
     t0 = time.time()
-    idx = exhaustive(rays, seed_shots=seed_shots, verbose=True)
+    idx = exhaustive(rays, seed_shots=seed_shots, verbosity=1)
     t1 = time.time()
     print(f"\n{len(idx)} extremal rays in {t1 - t0:.1f}s")
     assert len(idx) == 884, f"expected 884 extremal rays, got {len(idx)}"
 
     if args.verify:
         t0 = time.time()
-        ok, report = verify(rays, idx, verbose=True)
+        ok, report = verify(rays, idx, verbosity=1)
         print(f"verified: {ok} in {time.time() - t0:.1f}s")
         assert ok, report["failures"]
 

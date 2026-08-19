@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "extremal-rays"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fast extremal rays of pointed polyhedral cones via Clarkson's output-sensitive algorithm"
 authors = [{ name = "Nate MacFadden for the Liam McAllister Group" }]
 readme = "README.md"

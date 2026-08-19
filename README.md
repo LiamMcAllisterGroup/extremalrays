@@ -9,7 +9,7 @@ Given $R\in\mathbb{Z}^{n\times d}$ (or floats) whose rows generate a pointed con
 
 $$ \mathcal{C} = \\{\textstyle\sum_i \lambda_i R_i : \lambda_i \geq 0\\}, $$
 
-`extremal-rays` returns the indices of the unique minimal generating subset -- the extremal rays -- together with an optional certificate-based audit of the answer.
+`extremal-rays` provides three methods: `exhaustive` returns the indices of the unique minimal generating subset -- the extremal rays; `sample` cheaply certifies a subset of them (an inner bound, no completeness claim); `verify` independently audits an answer via explicit certificates.
 
 The standard method (as in [CYTools](https://cy.tools/)' `Cone.extremal_rays`) asks, for each ray, "is it a non-negative combination of all $n-1$ others?". Redundant rays answer quickly (the LP is feasible), but each *extremal* ray requires an **infeasibility proof** for a large degenerate system -- on the $h^{1,1}=491$ Mori cone, HiGHS exceeds 15 minutes on a single one. `extremal-rays` never asks that question: candidates are tested only against the small confirmed-extremal set, and extremality is only ever established constructively (see [Algorithm Notes](#algorithm-notes)).
 
@@ -66,7 +66,7 @@ Toric Mori cone (in a basis) of the CY hypersurface with $h^{1,1}=491$: 3509 gen
 | this package (single-threaded, incl. cleanup) | **~20 s** |
 | full certificate audit (optional) | ~2 min |
 
-The largest job run to date: the Mori-cone *cap* of the same CY, 10,026,843 candidate rays in 491 dimensions (1,218 extremal), completed in ~3 h with `n_workers=8` at a sustained ~1,800 candidates/s.
+The largest job run to date: the Mori-cone *cap* of the same CY, 10,026,843 candidate rays in 491 dimensions (1,218 extremal), in **79.6 min end-to-end** with `n_workers=8`, sparse input, generation order kept (`sort_candidates=False`), and the slice functional supplied via `w=` (the cap's dual cone has a compact description; solving the pointedness LP over 10M rows instead fails).
 
 ~94% of the runtime is HiGHS solve time (~3500 separation LPs at ~5 ms), so the Python layer is not the bottleneck. Results agree exactly with CYTools on Mori cones small enough for CYTools to finish ($h^{1,1}\in\\{10,25,50,100\\}$); the $h^{1,1}=491$ answer passes the full certificate audit and was cross-checked against NNLS on a sample.
 

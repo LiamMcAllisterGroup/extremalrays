@@ -36,7 +36,7 @@ from .core import positive_functional, _unique_primitive, _SeparationOracle
 def verify(R: ArrayLike,
            ext_indices: ArrayLike,
            tol: float = 1e-6,
-           verbose: bool = False) -> "tuple[bool, dict]":
+           verbosity: int = 0) -> "tuple[bool, dict]":
     """
     Check that R[ext_indices] is a minimal generating set for cone(R).
 
@@ -62,9 +62,9 @@ def verify(R: ArrayLike,
     tol : float, optional
         Maximum allowed reconstruction residual for membership certificates.
         Defaults to 1e-6.
-    verbose : bool, optional
-        Whether to print the worst certificate margins and any failures.
-        Defaults to False.
+    verbosity : int, optional
+        The verbosity level; >= 1 prints the worst certificate margins and
+        any failures. Defaults to 0.
 
     Returns
     -------
@@ -124,7 +124,7 @@ def verify(R: ArrayLike,
         "worst_separation_margin": worst_margin,
         "failures": failures,
     }
-    if verbose:
+    if verbosity >= 1:
         print(f"worst membership residual: {worst_resid:.2e}")
         print(f"worst separation margin:   {worst_margin:.2e}")
         for f in failures:
