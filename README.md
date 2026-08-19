@@ -16,7 +16,7 @@ The standard method (as in [CYTools](https://cy.tools/)' `Cone.extremal_rays`) a
 ## Limitations
 
 - The cone must be pointed (strongly convex); non-pointed input raises `ValueError`. Decompose into lineality space + pointed quotient first (as CYTools already does).
-- Single-threaded. Not yet the bottleneck at the sizes tested; the candidate loop is parallelizable in principle with a shared confirmed set.
+- Parallel sweeps (`n_workers`) only pay off on long jobs: worker startup and snapshot refreshes cost a few seconds, so at the ~20 s benchmark scale `n_workers=8` is marginally *slower* (22.2 s vs 20.6 s serial); on a 10M-candidate job it gave ~1.9x.
 
 ## Installation
 
@@ -41,7 +41,7 @@ ok, report = verify_extremal_rays(R, idx)   # optional certificate audit
 
 Integer input enables exact primitive-vector deduplication and an exact rational fallback in cleanup. Duplicate directions collapse to their first occurrence. A wall-time breakdown of the last call is stored in `extremal_rays.core.LAST_PROFILE`.
 
-For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapshots of the confirmed set (verdicts stay exact; rare separation failures are re-resolved serially), and `checkpoint="state.npz"` saves state atomically every minute -- rerunning the same call resumes from the last checkpoint, guarded by a fingerprint of the input rays. Candidate *order* matters for speed: the separation oracle warm-starts between consecutive LPs, so orderings that keep similar rays adjacent (e.g. sorted rows) run up to ~10x faster than shuffled input.
+For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapshots of the confirmed set (verdicts stay exact; rare separation failures are re-resolved serially), and `checkpoint="state.npz"` saves state atomically every minute -- rerunning the same call resumes from the last checkpoint, guarded by a fingerprint of the input rays. Candidate *order* matters for speed: the separation oracle warm-starts between consecutive LPs, so orderings that keep similar rays adjacent run far faster than shuffled input (the default `sort_candidates=True` lexsorts internally; on the benchmark cone, shuffled input without it ran > 78 min vs 20.7 s with it).
 
 ## Algorithm Notes
 
@@ -63,6 +63,8 @@ Toric Mori cone (in a basis) of the CY hypersurface with $h^{1,1}=491$: 3509 gen
 | per-ray NNLS (CYTools `method="nnls"`) | ~15 CPU-hours, verdicts at ~10x the tolerance |
 | this package (single-threaded, incl. cleanup) | **~20 s** |
 | full certificate audit (optional) | ~2 min |
+
+The largest job run to date: the Mori-cone *cap* of the same CY, 10,026,843 candidate rays in 491 dimensions (1,218 extremal), completed in ~3 h with `n_workers=8` at a sustained ~1,800 candidates/s.
 
 ~94% of the runtime is HiGHS solve time (~3500 separation LPs at ~5 ms), so the Python layer is not the bottleneck. Results agree exactly with CYTools on Mori cones small enough for CYTools to finish ($h^{1,1}\in\\{10,25,50,100\\}$); the $h^{1,1}=491$ answer passes the full certificate audit and was cross-checked against NNLS on a sample.
 

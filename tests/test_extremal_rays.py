@@ -199,3 +199,14 @@ def test_checkpoint_fingerprint_guard(tmp_path):
     R2 = _random_pointed_rays(2)
     idx = extremal_rays(R2, checkpoint=ck)
     assert idx.tolist() == extremal_rays(R2).tolist()
+
+
+def test_sorted_and_unsorted_agree():
+    R = _random_pointed_rays(11, n=60, d=5)
+    rng = np.random.default_rng(0)
+    shuffled = R[rng.permutation(len(R))]
+    a = {tuple(r) for r in R[extremal_rays(R)]}
+    b = {tuple(r) for r in shuffled[extremal_rays(shuffled)]}
+    c = {tuple(r) for r in
+         shuffled[extremal_rays(shuffled, sort_candidates=False)]}
+    assert a == b == c
