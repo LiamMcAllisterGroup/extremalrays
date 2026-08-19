@@ -36,6 +36,7 @@ from fractions import Fraction
 import numpy as np
 from numpy.typing import ArrayLike
 import highspy
+from scipy import sparse
 from scipy.optimize import linprog
 
 _INF = highspy.kHighsInf
@@ -59,6 +60,77 @@ def _as_integer(R: np.ndarray) -> "np.ndarray | None":
     if np.allclose(R, Rr, rtol=0, atol=1e-9):
         return Rr.astype(np.int64)
     return None
+
+
+def _row(P, i: int) -> np.ndarray:
+    """Row ``i`` of a dense or CSR matrix as a dense 1d array."""
+    if sparse.issparse(P):
+        lo, hi = P.indptr[i], P.indptr[i + 1]
+        out = np.zeros(P.shape[1], dtype=P.data.dtype)
+        out[P.indices[lo:hi]] = P.data[lo:hi]
+        return out
+    return P[i]
+
+
+def _rows(P, idx) -> np.ndarray:
+    """Rows ``idx`` of a dense or CSR matrix as a dense 2d array."""
+    if sparse.issparse(P):
+        return P[idx].toarray()
+    return P[idx]
+
+
+def _padded_key(U: "sparse.csr_matrix") -> np.ndarray:
+    """
+    Fixed-width row keys for a CSR matrix: each row becomes its column
+    indices padded with ``dim`` followed by its values' int64 bit patterns
+    padded with 0. Since indices are sorted, distinct rows get distinct
+    keys, so the keys support exact deduplication; they also give a
+    deterministic support-locality order for ``sort_candidates``.
+    """
+    n, d = U.shape
+    nnz = np.diff(U.indptr)
+    width = int(nnz.max()) if n else 0
+    idx = np.full((n, width), d, dtype=np.int64)
+    val = np.zeros((n, width), dtype=np.float64)
+    rows = np.repeat(np.arange(n), nnz)
+    cols = np.arange(U.nnz) - np.repeat(U.indptr[:-1], nnz)
+    idx[rows, cols] = U.indices
+    val[rows, cols] = U.data
+    return np.hstack([idx, val.view(np.int64)])
+
+
+def _unique_primitive_sparse(
+    R: "sparse.spmatrix",
+) -> "tuple[sparse.csr_matrix, np.ndarray]":
+    """
+    Sparse counterpart of ``_unique_primitive``: unique primitive (integer)
+    or unit-norm (float) representatives, zero rays dropped, as float CSR.
+    """
+    R = sparse.csr_matrix(R, copy=True)
+    R.sum_duplicates()
+    R.eliminate_zeros()
+    R.sort_indices()
+    nnz = np.diff(R.indptr)
+    nonzero = nnz > 0
+    orig = np.flatnonzero(nonzero)
+    starts = R.indptr[:-1][nonzero]
+
+    data_int = _as_integer(R.data)
+    if data_int is not None:
+        g = np.gcd.reduceat(np.abs(data_int), starts)
+        data = (data_int // np.repeat(g, nnz[nonzero])).astype(float)
+    else:
+        norms = np.sqrt(np.add.reduceat(R.data.astype(float) ** 2, starts))
+        data = R.data / np.repeat(norms, nnz[nonzero])
+
+    indptr = np.zeros(len(orig) + 1, dtype=np.int64)
+    np.cumsum(nnz[nonzero], out=indptr[1:])
+    U = sparse.csr_matrix((data, R.indices, indptr),
+                          shape=(len(orig), R.shape[1]))
+
+    _, first = np.unique(_padded_key(U), axis=0, return_index=True)
+    first.sort()
+    return U[first], orig[first]
 
 
 def _unique_primitive(R: np.ndarray) -> "tuple[np.ndarray, np.ndarray]":
@@ -124,11 +196,12 @@ def positive_functional(R: ArrayLike) -> np.ndarray:
     ValueError
         If the cone is not pointed (the LP is infeasible).
     """
-    R = np.asarray(R)
+    if not sparse.issparse(R):
+        R = np.asarray(R)
     n, d = R.shape
     # minimizing sum(R @ w) keeps w tame; any feasible w would do
     res = linprog(
-        c=R.sum(axis=0).astype(float),
+        c=np.asarray(R.sum(axis=0), dtype=float).ravel(),
         A_ub=-R.astype(float),
         b_ub=-np.ones(n),
         bounds=[(None, None)] * d,
@@ -221,7 +294,7 @@ class _SeparationOracle:
 # ray shooting
 # -----------------------------------------------------------------------------
 
-def _shoot(P: np.ndarray,
+def _shoot(P,
            c: np.ndarray,
            cand: np.ndarray,
            rel_tol: float = 1e-9) -> "tuple[int, bool]":
@@ -236,17 +309,20 @@ def _shoot(P: np.ndarray,
     (``tied=True``) can be corrupted by floating point and require the
     cleanup pass.
     """
-    vals = P[cand] @ c
+    vals = (P @ c)[cand]  # full matvec: no candidate-submatrix copy
     atol = rel_tol * max(1.0, float(np.abs(vals).max()))
     T = cand[vals >= vals.max() - atol]
     tied = len(T) > 1
-    k = 0
-    d = P.shape[1]
-    while len(T) > 1 and k < d:
-        col = P[T, k]
-        atol_k = rel_tol * max(1.0, float(np.abs(col).max()))
-        T = T[col >= col.max() - atol_k]
-        k += 1
+    if tied:
+        PT = _rows(P, T)
+        k = 0
+        d = P.shape[1]
+        while len(T) > 1 and k < d:
+            col = PT[:, k]
+            atol_k = rel_tol * max(1.0, float(np.abs(col).max()))
+            keep = col >= col.max() - atol_k
+            T, PT = T[keep], PT[keep]
+            k += 1
     return int(T[0]), tied
 
 
@@ -302,12 +378,20 @@ def _exact_membership(r: np.ndarray,
 # checkpointing and parallel sweeps
 # -----------------------------------------------------------------------------
 
-def _fingerprint(U: np.ndarray) -> str:
+def _fingerprint(U) -> str:
     """
     Cheap input fingerprint guarding checkpoint resumes against a changed
     ray matrix (shape, edge blocks, and total mass -- not cryptographic).
     """
     h = hashlib.sha256()
+    if sparse.issparse(U):
+        h.update(str(U.shape).encode())
+        h.update(str(U.nnz).encode())
+        h.update(U.data[:64].tobytes())
+        h.update(U.data[-64:].tobytes())
+        h.update(U.indices[:64].tobytes())
+        h.update(str(float(np.abs(U.data).sum())).encode())
+        return h.hexdigest()
     b = np.ascontiguousarray(U)
     h.update(str(b.shape).encode())
     h.update(b[:64].tobytes())
@@ -344,11 +428,39 @@ def _ckpt_load(path: str, fingerprint: str) -> "dict | None":
 _POOL = {}  # per-worker-process state
 
 
-def _pool_init(shm_name, shape, dtype):
+def _shm_export(P) -> "tuple[list, dict]":
+    """
+    Copy P (dense or CSR) into shared-memory blocks. Returns the blocks
+    (kept alive and unlinked by the caller) and the descriptor `_pool_init`
+    needs to reconstruct P in a worker.
+    """
     from multiprocessing import shared_memory
-    shm = shared_memory.SharedMemory(name=shm_name)
-    _POOL["shm"] = shm
-    _POOL["P"] = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+    arrays = (
+        {"P": P} if not sparse.issparse(P)
+        else {"data": P.data, "indices": P.indices, "indptr": P.indptr}
+    )
+    blocks, desc = [], {"shape": P.shape, "parts": {}}
+    for name, a in arrays.items():
+        shm = shared_memory.SharedMemory(create=True, size=a.nbytes)
+        np.ndarray(a.shape, a.dtype, buffer=shm.buf)[:] = a
+        blocks.append(shm)
+        desc["parts"][name] = (shm.name, a.shape, str(a.dtype))
+    return blocks, desc
+
+
+def _pool_init(desc):
+    from multiprocessing import shared_memory
+    parts = {}
+    for name, (shm_name, shape, dtype) in desc["parts"].items():
+        shm = shared_memory.SharedMemory(name=shm_name)
+        _POOL[f"shm_{name}"] = shm
+        parts[name] = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+    if "P" in parts:
+        _POOL["P"] = parts["P"]
+    else:
+        _POOL["P"] = sparse.csr_matrix(
+            (parts["data"], parts["indices"], parts["indptr"]),
+            shape=desc["shape"])
 
 
 def _pool_sweep(args):
@@ -361,10 +473,10 @@ def _pool_sweep(args):
     P = _POOL["P"]
     oracle = _SeparationOracle(P.shape[1])
     for e in E_idx:
-        oracle.add_row(P[int(e)], int(e))
+        oracle.add_row(_row(P, int(e)), int(e))
     redundant, failed = [], []
     for k in chunk:
-        p = P[int(k)]
+        p = _row(P, int(k))
         val, _ = oracle.separate(p)
         if val <= tol * max(1.0, float(np.abs(p).max())):
             redundant.append(int(k))
@@ -400,10 +512,12 @@ def extremal_rays(R: ArrayLike,
 
     Parameters
     ----------
-    R : array-like of shape (n, dim)
+    R : array-like or scipy.sparse matrix of shape (n, dim)
         Matrix whose rows generate the cone. Integer input enables exact
         primitive-vector deduplication and the exact rational fallback in
-        the cleanup pass.
+        the cleanup pass. Sparse input is kept sparse throughout (rows are
+        densified one at a time at the LP boundary), so cones far too
+        large to materialize densely are fine.
     tol : float, optional
         Relative threshold on the separation LP value for deciding
         membership vs. separation. Defaults to 1e-7.
@@ -466,26 +580,46 @@ def extremal_rays(R: ArrayLike,
     t_total = time.perf_counter()
 
     t0 = time.perf_counter()
-    R_in = np.asarray(R)
-    if R_in.ndim != 2 or R_in.shape[0] == 0:
+    is_sparse = sparse.issparse(R)
+    if is_sparse:
+        R_in = sparse.csr_matrix(R, copy=True)
+        R_in.sum_duplicates()
+        R_in.sort_indices()
+        U, rep = _unique_primitive_sparse(R_in)
+        data_int = _as_integer(R_in.data)
+        R_int = None
+        if data_int is not None:
+            R_int = sparse.csr_matrix(
+                (data_int, R_in.indices, R_in.indptr), shape=R_in.shape)
+    else:
+        R_in = np.asarray(R)
+        if R_in.ndim != 2:
+            raise ValueError("R must be a non-empty 2d array of rays")
+        U, rep = _unique_primitive(R_in)
+        R_int = _as_integer(R_in)
+    if R_in.shape[0] == 0:
         raise ValueError("R must be a non-empty 2d array of rays")
-    U, rep = _unique_primitive(R_in)
     n, d = U.shape
     if n == 1:
         return rep.copy()
 
-    R_int = _as_integer(R_in)
-
     if sort_candidates:
         # similar rays adjacent => warm-started LPs; the minimal set is
         # order-independent, so only speed changes
-        order = np.lexsort(U.T[::-1])
+        if is_sparse:
+            order = np.lexsort(_padded_key(U).T[::-1])
+        else:
+            order = np.lexsort(U.T[::-1])
         U, rep = U[order], rep[order]
     prof["preprocess"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     w = positive_functional(U)
-    P = U / (U @ w)[:, None]
+    if is_sparse:
+        P = sparse.diags(1.0 / (U @ w)) @ U
+        P.sort_indices()
+    else:
+        P = U / (U @ w)[:, None]
     prof["positive_functional"] = time.perf_counter() - t0
 
     # status: 0 unknown, 1 confirmed extremal, -1 confirmed redundant
@@ -498,7 +632,7 @@ def extremal_rays(R: ArrayLike,
         status[j] = 1
         E.append(j)
         suspect[j] = tied
-        oracle.add_row(P[j], j)
+        oracle.add_row(_row(P, j), j)
 
     # --- checkpoint resume
     fp = _fingerprint(U) if checkpoint else None
@@ -510,7 +644,7 @@ def extremal_rays(R: ArrayLike,
             for j, s in zip(ck["E"], ck["suspects"]):
                 E.append(int(j))
                 suspect[int(j)] = bool(s)
-                oracle.add_row(P[int(j)], int(j))
+                oracle.add_row(_row(P, int(j)), int(j))
             resumed = True
             if verbose:
                 print(f"resumed: |E| = {len(E)}, "
@@ -549,13 +683,14 @@ def extremal_rays(R: ArrayLike,
     def resolve(i):
         """One Clarkson resolution: redundant, or E grows until i is shot."""
         nonlocal n_lp
+        p = _row(P, i)
         for _ in range(n + 1):  # safety bound; each pass grows E or resolves
             t0 = time.perf_counter()
-            val, c = oracle.separate(P[i])
+            val, c = oracle.separate(p)
             prof["main_separation_lp"] += time.perf_counter() - t0
             n_lp += 1
             prof["n_lp_main"] += 1
-            if val <= tol * max(1.0, float(np.abs(P[i]).max())):
+            if val <= tol * max(1.0, float(np.abs(p).max())):
                 status[i] = -1
                 return
             t0 = time.perf_counter()
@@ -573,12 +708,10 @@ def extremal_rays(R: ArrayLike,
         # dispatch; the rare separation failures are resolved serially here
         # while the workers keep going. Verdicts against a stale snapshot
         # stay valid because E only grows.
-        from multiprocessing import get_context, shared_memory
-        shm = shared_memory.SharedMemory(create=True, size=P.nbytes)
-        np.ndarray(P.shape, P.dtype, buffer=shm.buf)[:] = P
+        from multiprocessing import get_context
+        blocks, desc = _shm_export(P)
         pool = get_context("spawn").Pool(
-            n_workers, initializer=_pool_init,
-            initargs=(shm.name, P.shape, str(P.dtype)))
+            n_workers, initializer=_pool_init, initargs=(desc,))
         try:
             chunk = max(64, min(2000, n // (8 * n_workers) or 64))
 
@@ -611,8 +744,9 @@ def extremal_rays(R: ArrayLike,
         finally:
             pool.close()
             pool.join()
-            shm.close()
-            shm.unlink()
+            for shm in blocks:
+                shm.close()
+                shm.unlink()
 
     for i in range(n):
         if status[i] != 0:
@@ -640,34 +774,36 @@ def extremal_rays(R: ArrayLike,
             others = [x for x in E if x != e]
             if not others:
                 continue
+            pe = _row(P, e)
             oracle.relax(e)
             t0 = time.perf_counter()
-            val, _c = oracle.separate(P[e])
+            val, _c = oracle.separate(pe)
             prof["cleanup_separation_lp"] += time.perf_counter() - t0
             n_lp += 1
             prof["n_lp_cleanup"] += 1
-            scale = max(1.0, float(np.abs(P[e]).max()))
+            scale = max(1.0, float(np.abs(pe).max()))
             if val > tol * scale:
                 oracle.restore(e)
                 continue
             # not separable: demand a positive certificate of redundancy
             t0 = time.perf_counter()
+            Po = _rows(P, others)
             res = linprog(
                 c=np.zeros(len(others)),
-                A_eq=P[others].T,
-                b_eq=P[e],
+                A_eq=Po.T,
+                b_eq=pe,
                 bounds=[(0, None)],
                 method="highs",
             )
             resid = (
-                float(np.abs(P[others].T @ res.x - P[e]).max())
+                float(np.abs(Po.T @ res.x - pe).max())
                 if res.success else np.inf
             )
             prof["cleanup_membership_lp"] += time.perf_counter() - t0
             certified = res.success and resid < 1e-6
             if not certified and R_int is not None and res.success:
                 certified = _exact_membership(
-                    R_int[rep[e]], R_int[rep[others]], res.x
+                    _row(R_int, rep[e]), _rows(R_int, rep[others]), res.x
                 )
             if certified:
                 E.remove(e)

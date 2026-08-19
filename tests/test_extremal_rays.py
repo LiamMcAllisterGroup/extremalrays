@@ -25,6 +25,7 @@
 import numpy as np
 import pytest
 from scipy.optimize import linprog
+from scipy.sparse import csr_matrix
 
 # local imports
 from extremal_rays import extremal_rays, verify_extremal_rays
@@ -210,3 +211,50 @@ def test_sorted_and_unsorted_agree():
     c = {tuple(r) for r in
          shuffled[extremal_rays(shuffled, sort_candidates=False)]}
     assert a == b == c
+
+
+@pytest.mark.parametrize("trial", range(5))
+def test_sparse_matches_dense(trial):
+    R = _random_pointed_rays(trial, n=50, d=5)
+    a = extremal_rays(R)
+    b = extremal_rays(csr_matrix(R))
+    assert a.tolist() == b.tolist()
+
+
+def test_sparse_float_matches_dense():
+    rng = np.random.default_rng(3)
+    R = np.column_stack(
+        [rng.uniform(1, 2, 40), rng.standard_normal((40, 3))]
+    )
+    R[np.abs(R) < 1.2] = 0.0  # genuine sparsity, non-integral values
+    R[:, 0] = np.abs(R[:, 0]) + 1
+    a = extremal_rays(R)
+    b = extremal_rays(csr_matrix(R))
+    assert a.tolist() == b.tolist()
+
+
+def test_sparse_duplicates_and_zero_rows():
+    R = np.array([[1, 0], [2, 0], [0, 0], [1, 1], [0, 1], [0, 3]])
+    idx = extremal_rays(csr_matrix(R))
+    assert sorted(idx.tolist()) == [0, 4]
+
+
+def test_sparse_parallel_matches_serial():
+    R = csr_matrix(_random_pointed_rays(5, n=60, d=5))
+    a = extremal_rays(R)
+    b = extremal_rays(R, n_workers=2)
+    assert a.tolist() == b.tolist()
+
+
+def test_sparse_checkpoint_resume(tmp_path):
+    R = csr_matrix(_random_pointed_rays(9))
+    ck = str(tmp_path / "state.npz")
+    a = extremal_rays(R, checkpoint=ck)
+    b = extremal_rays(R, checkpoint=ck)
+    assert a.tolist() == b.tolist()
+
+
+def test_sparse_non_pointed_raises():
+    R = csr_matrix(np.array([[1, 0], [-1, 0], [0, 1]]))
+    with pytest.raises(ValueError, match="not pointed"):
+        extremal_rays(R)
