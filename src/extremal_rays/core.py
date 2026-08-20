@@ -422,29 +422,54 @@ def _exact_membership(r: np.ndarray,
     One-sided exact certifier: try to confirm r = sum lam_i a_i with
     lam >= 0, over the rationals, using the support of a float LP solution.
     Returns True only on a rigorous success; False means inconclusive.
+
+    Uses python-flint when available (exact solve in C); otherwise
+    fraction-free Bareiss elimination over Python ints. Per-entry Fraction
+    arithmetic is avoided in both paths: it measured pathologically slow
+    (minutes per candidate near dimension 500).
     """
     supp = np.flatnonzero(lam_float > support_tol)
     if len(supp) == 0:
         return bool(np.all(r == 0))
     d = len(r)
     ncol = len(supp)
-    # Gaussian elimination over Q on [A_supp | r]
-    M = [
-        [Fraction(int(A_rows[j][k])) for j in supp] + [Fraction(int(r[k]))]
-        for k in range(d)
-    ]
-    piv_cols, ri = [], 0
+    A = [[int(A_rows[j][k]) for j in supp] for k in range(d)]
+    b = [int(r[k]) for k in range(d)]
+
+    try:
+        import flint
+        M = flint.fmpq_mat([row + [rhs] for row, rhs in zip(A, b)])
+        M = M.rref()[0]
+        x = [Fraction(0)] * ncol
+        for q in range(d):
+            lead = next((c for c in range(ncol + 1) if M[q, c] != 0), None)
+            if lead is None:
+                continue
+            if lead == ncol:  # 0 = nonzero: inconsistent
+                return False
+            row = [M[q, c] for c in range(lead + 1, ncol)]
+            if any(v != 0 for v in row):  # free variables: inconclusive
+                return False
+            v = M[q, ncol] / M[q, lead]
+            x[lead] = Fraction(int(v.p), int(v.q))
+        return all(v >= 0 for v in x)
+    except ImportError:
+        pass
+
+    # Bareiss fraction-free forward elimination on [A | b]
+    M = [row + [rhs] for row, rhs in zip(A, b)]
+    piv_cols, ri, prev = [], 0, 1
     for cj in range(ncol):
         pr = next((q for q in range(ri, d) if M[q][cj] != 0), None)
         if pr is None:
             continue
         M[ri], M[pr] = M[pr], M[ri]
         pv = M[ri][cj]
-        M[ri] = [v / pv for v in M[ri]]
-        for q in range(d):
-            if q != ri and M[q][cj] != 0:
-                f = M[q][cj]
-                M[q] = [a - f * b for a, b in zip(M[q], M[ri])]
+        for q in range(ri + 1, d):
+            f = M[q][cj]
+            M[q] = [(pv * a - f * b_) // prev
+                    for a, b_ in zip(M[q], M[ri])]
+        prev = pv
         piv_cols.append(cj)
         ri += 1
         if ri == d:
@@ -453,8 +478,12 @@ def _exact_membership(r: np.ndarray,
         if M[q][ncol] != 0:
             return False
     x = [Fraction(0)] * ncol
-    for k, cj in enumerate(piv_cols):
-        x[cj] = M[k][ncol]
+    for k in range(len(piv_cols) - 1, -1, -1):
+        cj = piv_cols[k]
+        acc = Fraction(M[k][ncol])
+        for c in range(cj + 1, ncol):
+            acc -= M[k][c] * x[c]
+        x[cj] = acc / M[k][cj]
     return all(v >= 0 for v in x)
 
 
