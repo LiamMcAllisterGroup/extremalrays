@@ -52,6 +52,8 @@ _CG_THRESHOLD = 200_000  # rows above which the pointedness LP uses
 _CG_BATCH = 8            # subset and growth size, in multiples of dim
 _CG_ROUNDS = 60          # rounds before giving up (suggest w=)
 
+_CLEANUP_LP_TIME_LIMIT = 60.0  # seconds per membership-certificate LP
+
 
 # -----------------------------------------------------------------------------
 # preprocessing
@@ -934,7 +936,9 @@ def exhaustive(R: ArrayLike,
         prof["n_suspects"] = len(suspects)
         if verbosity >= 1:
             print(f"cleanup: {len(suspects)}/{len(E)} rays were tie-admitted")
-        for e in suspects:
+        for k_sus, e in enumerate(suspects):
+            if verbosity >= 1 and k_sus % 50 == 0:
+                print(f"  cleanup: {k_sus}/{len(suspects)} suspects")
             others = [x for x in E if x != e]
             if not others:
                 continue
@@ -949,7 +953,10 @@ def exhaustive(R: ArrayLike,
             if val > tol * scale:
                 oracle.restore(e)
                 continue
-            # not separable: demand a positive certificate of redundancy
+            # not separable: demand a positive certificate of redundancy.
+            # time-limited: single HiGHS solves have measured hour-scale
+            # pathologies on degenerate geometries, and an uncertified
+            # suspect is kept (sound), so a bounded attempt suffices
             t0 = time.perf_counter()
             Po = _rows(P, others)
             res = linprog(
@@ -958,6 +965,7 @@ def exhaustive(R: ArrayLike,
                 b_eq=pe,
                 bounds=[(0, None)],
                 method="highs",
+                options={"time_limit": _CLEANUP_LP_TIME_LIMIT},
             )
             resid = (
                 float(np.abs(Po.T @ res.x - pe).max())
