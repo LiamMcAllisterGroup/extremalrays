@@ -28,11 +28,12 @@ from __future__ import annotations
 # external imports
 import numpy as np
 from numpy.typing import ArrayLike
+from scipy import sparse
 from scipy.optimize import linprog
 
 # local imports
-from .core import (_rows, _unique_primitive, _unique_primitive_sparse,
-                   positive_functional, sparse)
+from .core import (_CG_BATCH, _CG_ROUNDS, _CG_THRESHOLD, _reduce, _rows,
+                   positive_functional)
 
 _RECESSIVE = np.inf  # exit time of a direction that never leaves the cone
 
@@ -45,8 +46,6 @@ def _margin_center(U) -> np.ndarray:
     constraint generation: a subset LP per round, verified against all
     rows by one matvec (direct HiGHS fails on very tall LPs).
     """
-    from .core import _CG_BATCH, _CG_ROUNDS, _CG_THRESHOLD
-
     n, d = U.shape
     if sparse.issparse(U):
         norms = np.sqrt(np.asarray(U.multiply(U).sum(axis=1)).ravel())
@@ -138,16 +137,15 @@ def _first_exits(T: np.ndarray,
 
 
 def sample(R: ArrayLike,
-                         work: int = 1000,
-                         n_walkers: int = 64,
-                         stall: int = 20,
-                         center: str = "margin",
-                         targeted: bool = True,
-                         jitter: float = 0.1,
-                         tie_tol: float = 1e-7,
-                         rng_seed: int = 0,
-                         verbosity: int = 0,
-                         ) -> "tuple[np.ndarray, np.ndarray]":
+           work: int = 1000,
+           n_walkers: int = 64,
+           stall: int = 20,
+           center: str = "margin",
+           targeted: bool = True,
+           jitter: float = 0.1,
+           tie_tol: float = 1e-7,
+           rng_seed: int = 0,
+           verbosity: int = 0) -> "tuple[np.ndarray, np.ndarray]":
     """
     Certified-extremal rays of cone(R), sampled cheaply (an inner bound).
 
@@ -207,10 +205,7 @@ def sample(R: ArrayLike,
     curve : ndarray of shape (n_records, 2)
         Discovery curve: rows (matvecs_spent, n_certified so far).
     """
-    if sparse.issparse(R):
-        U, rep = _unique_primitive_sparse(sparse.csr_matrix(R))
-    else:
-        U, rep = _unique_primitive(np.asarray(R))
+    U, rep = _reduce(R)
     n, d = U.shape
 
     if center == "margin":

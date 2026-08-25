@@ -67,7 +67,8 @@ def _as_integer(R: np.ndarray) -> "np.ndarray | None":
     if np.issubdtype(R.dtype, np.integer):
         return R.astype(np.int64)
     Rr = np.round(R)
-    if np.allclose(R, Rr, rtol=0, atol=1e-9):
+    if (np.allclose(R, Rr, rtol=0, atol=1e-9)
+            and np.abs(Rr).max(initial=0.0) < 2.0 ** 53):
         return Rr.astype(np.int64)
     return None
 
@@ -210,16 +211,38 @@ def _unique_primitive(R: np.ndarray) -> "tuple[np.ndarray, np.ndarray]":
         prim = R[nonzero] / norms[nonzero, None]
         orig = np.flatnonzero(nonzero)
 
-    seen = {}
-    rep = []
-    keep = []
-    for k, row in enumerate(prim):
-        key = tuple(row)
-        if key not in seen:
-            seen[key] = True
-            keep.append(k)
-            rep.append(orig[k])
-    return prim[keep].astype(float), np.array(rep, dtype=int)
+    # np.unique reports the first occurrence of each distinct row; sorting
+    # those positions keeps input order (rep ascending)
+    _, keep = np.unique(prim, axis=0, return_index=True)
+    keep = np.sort(keep)
+    return prim[keep].astype(float), orig[keep].astype(int)
+
+
+def _reduce(
+    R: ArrayLike,
+) -> "tuple[np.ndarray | sparse.csr_matrix, np.ndarray]":
+    """
+    Validate ``R`` and reduce it to unique primitive representatives.
+
+    Dispatches on sparse vs dense input; the result is float, zero rays are
+    dropped, and duplicated directions collapse to their first occurrence.
+    Returns ``(U, rep)`` as in ``_unique_primitive``.
+    """
+    if sparse.issparse(R):
+        return _unique_primitive_sparse(R)
+    R = np.asarray(R)
+    if R.ndim != 2 or R.shape[1] == 0:
+        raise ValueError("R must be a 2d array of rays")
+    return _unique_primitive(R)
+
+
+def _slice(U, w: np.ndarray):
+    """Scale each ray onto the affine slice w . x = 1 (sparse-aware)."""
+    if sparse.issparse(U):
+        P = sparse.diags(1.0 / (U @ w)) @ U
+        P.sort_indices()
+        return P
+    return U / (U @ w)[:, None]
 
 
 def positive_functional(R: ArrayLike) -> np.ndarray:
@@ -245,10 +268,23 @@ def positive_functional(R: ArrayLike) -> np.ndarray:
     ------
     ValueError
         If the cone is not pointed (the LP is infeasible).
+
+    Notes
+    -----
+    Zero rows are ignored (they do not change the cone but would make
+    R @ w >= 1 unsatisfiable).
     """
-    if not sparse.issparse(R):
-        R = np.asarray(R)
+    if sparse.issparse(R):
+        R = sparse.csr_matrix(R)
+        nonzero = np.diff(R.indptr) > 0
+    else:
+        R = np.asarray(R, dtype=float)
+        nonzero = np.any(R != 0, axis=1)
+    if not nonzero.all():
+        R = R[nonzero]
     n, d = R.shape
+    if n == 0:
+        raise ValueError("R must contain at least one nonzero ray")
     if n > _CG_THRESHOLD:
         # constraint generation: HiGHS fails outright on very tall direct
         # LPs, but a subset LP plus one full matvec of verification per
@@ -268,29 +304,27 @@ def positive_functional(R: ArrayLike) -> np.ndarray:
             "rounds; if a positive functional is known, pass it via w="
         )
     w = _pf_lp(R)
-    slack = R @ w
-    if slack.min() <= 0.5:
-        raise RuntimeError(
-            "positive-functional certificate failed "
-            f"(min slack {slack.min():.3e})"
-        )
-    return w
+    return w / (R @ w).min()  # rescale: R @ w >= 1 on the raw rows
 
 
 def _pf_lp(R) -> np.ndarray:
-    """The direct LP behind positive_functional: min sum(R w), R w >= 1."""
+    """
+    The direct LP behind positive_functional: min sum(R w), R w >= 1, solved
+    on unit-normalized rows (positivity is row-scale-free, and unit rows
+    keep HiGHS conditioned when coefficients span many orders of magnitude).
+    The returned w is strictly positive on every row of R, with slack >= 1
+    on the normalized rows; callers rescale as needed.
+    """
     n, d = R.shape
-    # positivity is row-scale-free, so unit rows keep HiGHS conditioned
-    # even when coefficients span many orders of magnitude
     if sparse.issparse(R):
         norms = np.sqrt(np.asarray(R.multiply(R).sum(axis=1)).ravel())
-        R = sparse.diags(1.0 / norms) @ R
+        Rn = sparse.diags(1.0 / norms) @ R
     else:
-        R = R / np.linalg.norm(R, axis=1)[:, None]
+        Rn = R / np.linalg.norm(R, axis=1)[:, None]
     # minimizing sum(R @ w) keeps w tame; any feasible w would do
     res = linprog(
-        c=np.asarray(R.sum(axis=0), dtype=float).ravel(),
-        A_ub=-R.astype(float),
+        c=np.asarray(Rn.sum(axis=0), dtype=float).ravel(),
+        A_ub=-Rn.astype(float),
         b_ub=-np.ones(n),
         bounds=[(None, None)] * d,
         method="highs",
@@ -305,7 +339,18 @@ def _pf_lp(R) -> np.ndarray:
             f"pointedness LP failed (status {res.status}: {res.message}); "
             "if a positive functional is known, pass it via w="
         )
+    slack = Rn @ res.x
+    if slack.min() <= 0.5:  # solver junk: never trust a bad certificate
+        raise RuntimeError(
+            "positive-functional certificate failed "
+            f"(min slack {slack.min():.3e})"
+        )
     return res.x
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    """v / |v|_2 (v must be nonzero)."""
+    return v / np.linalg.norm(v)
 
 
 # -----------------------------------------------------------------------------
@@ -320,6 +365,17 @@ class _SeparationOracle:
     tests, so HiGHS warm-starts from the previous basis. Rows can be relaxed
     (bounds widened to free) and restored, which is how the cleanup pass
     tests a confirmed ray against the others without rebuilding the model.
+
+    The membership question is conic, hence homogeneous in every row and
+    in p, so all vectors are unit-normalized on entry. This makes the
+    separation value scale-free -- a fixed tolerance then means the same
+    thing for every candidate -- and keeps the LP conditioned. Slice
+    coordinates (whose magnitudes can vary by orders of magnitude across
+    rays under an anisotropic w) would otherwise squash the separation
+    value of small points below the solver's noise floor: on the h11=491
+    Mori cone, an extremal ray with |p| ~ 1e-4 scored 8e-8 unnormalized
+    (below tol) versus 7e-4 normalized, while every redundant ray scores
+    below 1e-11 normalized.
 
     Rare HiGHS solve errors are healed by rebuilding a fresh model and
     retrying once, losing only that solve's warm start.
@@ -343,8 +399,9 @@ class _SeparationOracle:
             self.h.changeRowBounds(self.row_of[key], -_INF, _INF)
 
     def add_row(self, e: np.ndarray, key: int) -> None:
+        e = _unit(np.asarray(e, dtype=float))
         nz = np.flatnonzero(e).astype(np.int32)
-        vals = e[nz].astype(float)
+        vals = e[nz]
         self._rows.append((nz, vals))
         self.h.addRow(-_INF, 0.0, len(nz), nz, vals)
         self.row_of[key] = len(self.row_of)
@@ -359,14 +416,17 @@ class _SeparationOracle:
 
     def separate(self, p: np.ndarray) -> "tuple[float, np.ndarray]":
         """
-        Return ``(val, c)`` with val = max c . p. By Farkas' lemma, val ~ 0
-        iff p is in cone(E); val > 0 gives a separating functional c.
+        Return ``(val, c)`` with val = max c . p/|p|. By Farkas' lemma,
+        val ~ 0 iff p is in cone(E); val > 0 gives a separating functional
+        c. The value is scale-free in p, so it can be compared against a
+        fixed tolerance.
 
         Raises on any repeated non-optimal solver status: a solver failure
         must never be silently interpreted as a verdict.
         """
+        p = _unit(np.asarray(p, dtype=float))
         for _ in range(2):
-            self.h.changeColsCost(self.d, self._col_idx, (-p).astype(float))
+            self.h.changeColsCost(self.d, self._col_idx, -p)
             self.h.run()
             if self.h.getModelStatus() == highspy.HighsModelStatus.kOptimal:
                 val = -self.h.getInfo().objective_function_value
@@ -423,7 +483,9 @@ def _exact_membership(r: np.ndarray,
     """
     One-sided exact certifier: try to confirm r = sum lam_i a_i with
     lam >= 0, over the rationals, using the support of a float LP solution.
-    Returns True only on a rigorous success; False means inconclusive.
+    Returns True only on a rigorous success; False means inconclusive. When
+    the restricted system is underdetermined, the particular solution with
+    free variables at zero is tested (a valid certificate if non-negative).
 
     Uses python-flint when available (exact solve in C); otherwise
     fraction-free Bareiss elimination over Python ints. Per-entry Fraction
@@ -449,9 +511,7 @@ def _exact_membership(r: np.ndarray,
                 continue
             if lead == ncol:  # 0 = nonzero: inconsistent
                 return False
-            row = [M[q, c] for c in range(lead + 1, ncol)]
-            if any(v != 0 for v in row):  # free variables: inconclusive
-                return False
+            # particular solution with free variables at zero (both paths)
             v = M[q, ncol] / M[q, lead]
             x[lead] = Fraction(int(v.p), int(v.q))
         return all(v >= 0 for v in x)
@@ -592,7 +652,7 @@ def _pool_sweep(args):
     for k in chunk:
         p = _row(P, int(k))
         val, _ = oracle.separate(p)
-        if val <= tol * max(1.0, float(np.abs(p).max())):
+        if val <= tol:
             redundant.append(int(k))
         else:
             failed.append(int(k))
@@ -604,16 +664,16 @@ def _pool_sweep(args):
 # -----------------------------------------------------------------------------
 
 def exhaustive(R: ArrayLike,
-                  tol: float = 1e-7,
-                  seed_shots: "int | str" = "auto",
-                  cleanup: bool = True,
-                  verbosity: int = 0,
-                  rng_seed: int = 0,
-                  n_workers: int = 0,
-                  checkpoint: "str | None" = None,
-                  sort_candidates: bool = False,
-                  known: "ArrayLike | None" = None,
-                  w: "ArrayLike | None" = None) -> np.ndarray:
+               tol: float = 1e-7,
+               seed_shots: "int | str" = "auto",
+               cleanup: bool = True,
+               verbosity: int = 0,
+               rng_seed: int = 0,
+               n_workers: int = 0,
+               checkpoint: "str | None" = None,
+               sort_candidates: bool = False,
+               known: "ArrayLike | None" = None,
+               w: "ArrayLike | None" = None) -> np.ndarray:
     """
     Indices of a minimal generating subset of the rays R of a pointed cone.
 
@@ -635,8 +695,12 @@ def exhaustive(R: ArrayLike,
         densified one at a time at the LP boundary), so cones far too
         large to materialize densely are fine.
     tol : float, optional
-        Relative threshold on the separation LP value for deciding
-        membership vs. separation. Defaults to 1e-7.
+        Threshold on the separation LP value (computed for unit-normalized
+        vectors, so it is scale-free) below which a candidate counts as a
+        member of cone(E). Redundant rays score at the solver's noise
+        floor (~1e-12); the closest calls made are reported in
+        ``core.LAST_PROFILE["closest_member"]`` and ``["closest_separated"]``.
+        Defaults to 1e-7.
     seed_shots : int or "auto", optional
         Number of random functionals shot before the main loop to
         pre-populate E cheaply (each shot is a matvec argmax, no LP).
@@ -706,29 +770,30 @@ def exhaustive(R: ArrayLike,
         "cleanup_separation_lp", "cleanup_membership_lp", "total",
     )}
     prof["n_lp_main"] = prof["n_lp_cleanup"] = prof["n_shoot"] = 0
+    prof["n_suspects"] = 0
+    # largest value ruled a member / smallest value ruled separated: the
+    # two should be far apart; a small gap means tol is doing real work
+    closest = {"member": 0.0, "separated": np.inf}
     t_total = time.perf_counter()
 
     t0 = time.perf_counter()
     is_sparse = sparse.issparse(R)
+    U, rep = _reduce(R)
+    # integer copy of the input (None if non-integral): the exact cleanup
+    # fallback certifies over the original integer rays, not the float slice
     if is_sparse:
-        R_in = sparse.csr_matrix(R, copy=True)
+        R_in = sparse.csr_matrix(R)
         R_in.sum_duplicates()
-        R_in.sort_indices()
-        U, rep = _unique_primitive_sparse(R_in)
         data_int = _as_integer(R_in.data)
         R_int = None
         if data_int is not None:
             R_int = sparse.csr_matrix(
                 (data_int, R_in.indices, R_in.indptr), shape=R_in.shape)
     else:
-        R_in = np.asarray(R)
-        if R_in.ndim != 2:
-            raise ValueError("R must be a non-empty 2d array of rays")
-        U, rep = _unique_primitive(R_in)
-        R_int = _as_integer(R_in)
-    if R_in.shape[0] == 0:
-        raise ValueError("R must be a non-empty 2d array of rays")
+        R_int = _as_integer(np.asarray(R))
     n, d = U.shape
+    if n == 0:
+        raise ValueError("R must contain at least one nonzero ray")
     if n == 1:
         return rep.copy()
 
@@ -752,11 +817,7 @@ def exhaustive(R: ArrayLike,
         w = w / margins.min()  # rescale so U @ w >= 1, matching the LP
     else:
         w = positive_functional(U)
-    if is_sparse:
-        P = sparse.diags(1.0 / (U @ w)) @ U
-        P.sort_indices()
-    else:
-        P = U / (U @ w)[:, None]
+    P = _slice(U, w)
     prof["positive_functional"] = time.perf_counter() - t0
 
     # status: 0 unknown, 1 confirmed extremal, -1 confirmed redundant
@@ -857,9 +918,11 @@ def exhaustive(R: ArrayLike,
             prof["main_separation_lp"] += time.perf_counter() - t0
             n_lp += 1
             prof["n_lp_main"] += 1
-            if val <= tol * max(1.0, float(np.abs(p).max())):
+            if val <= tol:
                 status[i] = -1
+                closest["member"] = max(closest["member"], val)
                 return
+            closest["separated"] = min(closest["separated"], val)
             t0 = time.perf_counter()
             j, tied = _shoot(P, c, np.flatnonzero(status == 0))
             prof["main_ray_shoot"] += time.perf_counter() - t0
@@ -949,8 +1012,7 @@ def exhaustive(R: ArrayLike,
             prof["cleanup_separation_lp"] += time.perf_counter() - t0
             n_lp += 1
             prof["n_lp_cleanup"] += 1
-            scale = max(1.0, float(np.abs(pe).max()))
-            if val > tol * scale:
+            if val > tol:
                 oracle.restore(e)
                 continue
             # not separable: demand a positive certificate of redundancy.
@@ -992,6 +1054,8 @@ def exhaustive(R: ArrayLike,
                 )
 
     save_ckpt()
+    prof["closest_member"] = closest["member"]
+    prof["closest_separated"] = closest["separated"]
     prof["total"] = time.perf_counter() - t_total
     LAST_PROFILE.clear()
     LAST_PROFILE.update(prof)

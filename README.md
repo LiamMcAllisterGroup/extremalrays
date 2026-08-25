@@ -51,7 +51,7 @@ An LP finds $w$ with $w\cdot s\geq 1$ on all rays (doubling as the pointedness c
 
 $$ \max\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \forall e\in E, \quad -1\leq c_i\leq 1, $$
 
-which is always feasible and bounded. Value $0$ means $p\in\text{cone}(E)$ (Farkas): redundant, valid however incomplete $E$ is. A positive value proves nothing about $p$ -- it proves $E$ is missing an extremal ray, and the optimizer $c$ locates it by *ray shooting*: the tie-broken maximizer of $c\cdot s$ over the remaining candidates is provably a vertex, joins $E$, and $p$ is retested. Total LP count is $\leq n+|E|$, all small, solved on one persistent warm-started HiGHS model (objective swap per test, one row appended per confirmed ray).
+which is always feasible and bounded. Value $0$ means $p\in\text{cone}(E)$ (Farkas): redundant, valid however incomplete $E$ is. The oracle unit-normalizes $p$ and every $e$ (membership is conic, so this changes nothing mathematically) so that the value is scale-free and a fixed tolerance means the same thing for every candidate; on the $h^{1,1}=491$ cone, redundant rays then score $\lesssim 10^{-12}$ and the closest extremal ray $\sim 4\times10^{-5}$ (the two closest calls of a run are reported in `LAST_PROFILE`). Without normalization, slice coordinates under the LP's anisotropic $w$ squash some rays by $10^{3}$ and an extremal ray of that cone scored $8\times10^{-8}$ -- under the tolerance -- and was dropped. A positive value proves nothing about $p$ -- it proves $E$ is missing an extremal ray, and the optimizer $c$ locates it by *ray shooting*: the tie-broken maximizer of $c\cdot s$ over the remaining candidates is provably a vertex, joins $E$, and $p$ is retested. Total LP count is $\leq n+|E|$, all small, solved on one persistent warm-started HiGHS model (objective swap per test, one row appended per confirmed ray).
 
 Floating-point tie-breaking can rarely admit a redundant ray into $E$; a cleanup pass retests exactly the tie-admitted rays (unique maximizers are provably vertices and skip it), removing a ray only on a positive certificate of redundancy -- escalating to exact rational arithmetic for integer input -- so the result always generates the cone. See the module docstrings in [`core.py`](src/extremal_rays/core.py) for details; I encourage you to read it.
 
@@ -69,6 +69,42 @@ Toric Mori cone (in a basis) of the CY hypersurface with $h^{1,1}=491$: 3509 gen
 The largest job run to date: the Mori-cone *cap* of the same CY, 10,026,843 candidate rays in 491 dimensions (1,218 extremal), in **79.6 min end-to-end** with `n_workers=8`, sparse input, generation order kept (`sort_candidates=False`), and the slice functional supplied via `w=` (the cap's dual cone has a compact description; solving the pointedness LP over 10M rows instead fails).
 
 ~94% of the runtime is HiGHS solve time (~3500 separation LPs at ~5 ms), so the Python layer is not the bottleneck. Results agree exactly with CYTools on Mori cones small enough for CYTools to finish ($h^{1,1}\in\\{10,25,50,100\\}$); the $h^{1,1}=491$ answer passes the full certificate audit and was cross-checked against NNLS on a sample.
+
+## Citation
+
+If you use `extremal-rays` in your research, please cite it:
+
+```bibtex
+@software{extremal_rays,
+  author  = {MacFadden, Nate},
+  title   = {extremal-rays},
+  url     = {https://github.com/LiamMcAllisterGroup/extremal_rays},
+  orcid   = {0000-0002-8481-3724},
+}
+```
+
+## Organization
+
+```
+extremal_rays/
+├── src/extremal_rays/
+│   ├── core.py                    # exhaustive(): Clarkson sweep, separation oracle, ray shooting, cleanup, checkpoints, workers
+│   ├── inner.py                   # sample(): cheap certified subset via dual-cone facet walks
+│   └── verify.py                  # verify(): independent certificate audit of a claimed answer
+├── tests/
+│   ├── conftest.py                # shared helpers: random pointed cones, vendored CYTools per-ray LP reference
+│   ├── test_exhaustive.py         # exhaustive(): known cones, degenerate input, invariances, brute-force cross-checks
+│   ├── test_parallel_checkpoint.py# n_workers sweeps, checkpoint save/resume/fingerprint/.bak rotation
+│   ├── test_sample.py             # sample(): certified-subset property, determinism, options
+│   ├── test_verify.py             # verify(): accepts right answers, rejects wrong ones, sparse input
+│   ├── test_internals.py          # unit tests of _shoot, _exact_membership, dedup keys, positive_functional
+│   ├── test_readme_examples.py    # the README usage snippet runs as documented
+│   └── data/                      # Mori-cone caps with CYTools-produced extremal sets (regression fixtures)
+├── benchmarks/
+│   ├── bench_mori.py              # the h11=491 Mori cone benchmark (data bundled)
+│   └── data/
+└── pyproject.toml
+```
 
 ## License
 

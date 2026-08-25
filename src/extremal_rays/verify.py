@@ -30,12 +30,14 @@ from numpy.typing import ArrayLike
 from scipy.optimize import linprog
 
 # local imports
-from .core import positive_functional, _unique_primitive, _SeparationOracle
+from .core import (_reduce, _row, _rows, _slice, _SeparationOracle,
+                   positive_functional)
 
 
 def verify(R: ArrayLike,
            ext_indices: ArrayLike,
            tol: float = 1e-6,
+           time_limit: "float | None" = None,
            verbosity: int = 0) -> "tuple[bool, dict]":
     """
     Check that R[ext_indices] is a minimal generating set for cone(R).
@@ -55,13 +57,20 @@ def verify(R: ArrayLike,
 
     Parameters
     ----------
-    R : array-like of shape (n, dim)
+    R : array-like or scipy.sparse matrix of shape (n, dim)
         Matrix whose rows generate the cone.
     ext_indices : array-like of int
-        Indices into R of the claimed extremal rays.
+        Indices into R of the claimed extremal rays (first occurrences, as
+        exhaustive() returns them).
     tol : float, optional
         Maximum allowed reconstruction residual for membership certificates.
         Defaults to 1e-6.
+    time_limit : float | None, optional
+        Seconds allowed per membership LP. Single HiGHS solves have
+        measured hour-scale pathologies on degenerate geometries; a ray
+        whose LP times out is reported as a failure (no certificate), so
+        a bound keeps the audit finite without making it unsound.
+        Defaults to None (no limit).
     verbosity : int, optional
         The verbosity level; >= 1 prints the worst certificate margins and
         any failures. Defaults to 0.
@@ -73,30 +82,47 @@ def verify(R: ArrayLike,
     report : dict
         The worst membership residual, the worst separation margin, and a
         list of failure descriptions (empty when ok).
+
+    Raises
+    ------
+    ValueError
+        If an index in ``ext_indices`` is not a representative row (a zero
+        ray, or a later duplicate of an earlier direction).
     """
-    R_in = np.asarray(R)
-    U, rep = _unique_primitive(R_in)
-    rep_pos = {orig: k for k, orig in enumerate(rep)}
-    ext = sorted({rep_pos[i] for i in np.asarray(ext_indices)})
+    U, rep = _reduce(R)
+    rep_pos = {int(orig): k for k, orig in enumerate(rep)}
+    ext = set()
+    for i in np.asarray(ext_indices, dtype=int).ravel():
+        k = rep_pos.get(int(i))
+        if k is None:
+            raise ValueError(f"index {int(i)} is not a representative row "
+                             "(duplicate or zero ray?)")
+        ext.add(k)
+    ext = sorted(ext)
 
     w = positive_functional(U)
-    P = U / (U @ w)[:, None]
-    E = P[ext]
+    P = _slice(U, w)
+    E = _rows(P, ext)
     ext_set = set(ext)
 
     failures = []
     worst_resid = 0.0
-    for k in range(len(U)):
-        if k in ext_set:
+    if not ext:  # a nonzero cone has at least one extremal ray
+        failures.append("no rays claimed: cone(R) is nonzero")
+        worst_resid = np.inf
+    for k in range(U.shape[0]):
+        if k in ext_set or not ext:
             continue
+        pk = _row(P, k)
         res = linprog(
             c=np.zeros(len(E)),
             A_eq=E.T,
-            b_eq=P[k],
+            b_eq=pk,
             bounds=[(0, None)],
             method="highs",
+            options=None if time_limit is None else {"time_limit": time_limit},
         )
-        resid = (float(np.abs(E.T @ res.x - P[k]).max())
+        resid = (float(np.abs(E.T @ res.x - pk).max())
                  if res.success else np.inf)
         worst_resid = max(worst_resid, resid)
         if not (res.success and resid < tol):
@@ -104,16 +130,15 @@ def verify(R: ArrayLike,
                             f"(residual {resid:.2e})")
 
     oracle = _SeparationOracle(U.shape[1])
-    for e in ext:
-        oracle.add_row(P[e], e)
+    for k, e in enumerate(ext):
+        oracle.add_row(E[k], e)
     worst_margin = np.inf
-    for e in ext:
+    for k, e in enumerate(ext):
         oracle.relax(e)
-        val, _c = oracle.separate(P[e])
+        val, _c = oracle.separate(E[k])
         oracle.restore(e)
         worst_margin = min(worst_margin, val)
-        scale = max(1.0, float(np.abs(P[e]).max()))
-        if val <= 1e-7 * scale:
+        if val <= 1e-7:  # scale-free: the oracle normalizes its vectors
             failures.append(
                 f"ray {rep[e]}: no separation certificate (margin {val:.2e}) "
                 "-- possibly redundant"

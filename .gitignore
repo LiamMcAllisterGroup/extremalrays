@@ -1,5 +1,23 @@
+# macOS
+.DS_Store
+
+# Byte-compiled files
 __pycache__/
-*.egg-info/
-.pytest_cache/
+*.py[cod]
+
+# Distribution / packaging
 build/
 dist/
+*.egg-info/
+*.egg
+
+# tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# checkpoints written by exhaustive(checkpoint=...)
+*.npz.tmp
+*.npz.bak
