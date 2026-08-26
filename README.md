@@ -157,6 +157,7 @@ extremalrays/
 │   ├── _cytools_driver.py          # runs CYTools in a fresh interpreter so it can be time-limited
 │   └── data/                       # cone and cap ray matrices (polytope tables are fetched on demand)
 ├── docs/                           # README figures (benchmark_*.png)
+├── perf-work/                      # recorded benchmark results; the figures are drawn from these
 └── pyproject.toml
 ```
 
