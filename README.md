@@ -5,9 +5,9 @@ Fast extremal rays of pointed polyhedral cones via [Clarkson's output-sensitive 
 
 ## Description
 
-Given $R\in\mathbb{Z}^{n\times d}$ (or floats) whose rows generate a pointed cone
+Given $R\in\mathbb{Z}^{n\times d}$ (or floats) whose rows $r_i$ generate a pointed cone
 
-$$ \mathcal{C} = \\{\textstyle\sum_i \lambda_i R_i : \lambda_i \geq 0\\}, $$
+$$ \mathcal{C} = \\{\textstyle\sum_i \lambda_i r_i : \lambda_i \geq 0\\}, $$
 
 `exhaustive` returns the indices of the unique minimal generating subset, i.e. the extremal rays. `sample` is a cheaper cousin that certifies a subset of them and makes no completeness claim. `verify` audits an answer from explicit certificates, checking each one rather than trusting a solver status code.
 
