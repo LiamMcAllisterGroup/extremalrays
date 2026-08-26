@@ -33,12 +33,12 @@ import pytest
 from scipy.sparse import csr_matrix
 
 # local imports
-from extremal_rays import core
-from extremal_rays.core import (_as_integer, _exact_membership, _fingerprint,
+from extremalrays import core
+from extremalrays.core import (_as_integer, _exact_membership, _fingerprint,
                                 _first_unique, _padded_key, _reduce, _shoot,
                                 _SeparationOracle, _unique_primitive,
                                 _unique_primitive_sparse, positive_functional)
-from extremal_rays.inner import _exit_times, _first_exits
+from extremalrays.inner import _exit_times, _first_exits
 from conftest import random_pointed_rays
 
 
@@ -341,6 +341,6 @@ def test_constraint_generation_handles_wide_cones(monkeypatch):
     R = random_pointed_rays(3, n=20, d=6)   # _CG_BATCH * 6 = 48 > 20
     w = positive_functional(R)
     assert (R @ w).min() >= 1 - 1e-9
-    from extremal_rays import sample
+    from extremalrays import sample
     idx, _ = sample(R, work=200)
     assert set(idx.tolist()) <= set(core.exhaustive(R).tolist())

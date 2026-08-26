@@ -27,7 +27,7 @@ import pytest
 from scipy.sparse import csr_matrix
 
 # local imports
-from extremal_rays import exhaustive, verify
+from extremalrays import exhaustive, verify
 from conftest import random_float_rays, random_pointed_rays
 
 

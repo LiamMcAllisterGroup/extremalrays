@@ -34,7 +34,7 @@ uncertified rows facet-to-facet across ridges, with work counted in
 R-matvecs.
 
 Use it when any witness will do and cheapness matters. When the deliverable
-is THE extremal rays, use :func:`extremal_rays.exhaustive` instead: this
+is THE extremal rays, use :func:`extremalrays.exhaustive` instead: this
 saturates below the full set and has no reliable coverage estimate.
 """
 from __future__ import annotations

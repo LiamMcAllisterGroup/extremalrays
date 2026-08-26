@@ -27,8 +27,8 @@ import re
 # external imports
 
 # local imports
-import extremal_rays
-from extremal_rays import exhaustive, sample, verify
+import extremalrays
+from extremalrays import exhaustive, sample, verify
 
 README = pathlib.Path(__file__).resolve().parents[1] / "README.md"
 
@@ -61,13 +61,13 @@ def test_readme_documents_the_extras_it_tells_you_to_use():
 
 
 def test_public_api_and_version():
-    assert set(extremal_rays.__all__) == {"exhaustive", "positive_functional",
+    assert set(extremalrays.__all__) == {"exhaustive", "positive_functional",
                                           "sample", "verify"}
     # the literal lives in pyproject.toml only (see the sync test below)
-    assert re.fullmatch(r"\d+\.\d+\.\d+", extremal_rays.__version__)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", extremalrays.__version__)
     assert callable(exhaustive) and callable(sample) and callable(verify)
 
 
 def test_readme_version_matches_pyproject():
     pyproject = (README.parent / "pyproject.toml").read_text()
-    assert f'version = "{extremal_rays.__version__}"' in pyproject
+    assert f'version = "{extremalrays.__version__}"' in pyproject

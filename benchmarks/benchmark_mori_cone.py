@@ -63,7 +63,7 @@ except Exception as _exc:                              # noqa: BLE001
 
 # local imports (import highspy transitively; see the note above)
 from _bench import timed_median
-from extremal_rays import exhaustive
+from extremalrays import exhaustive
 
 HERE = pathlib.Path(__file__).parent
 CONES = HERE / "data" / "mori_cones_by_h11.npz"

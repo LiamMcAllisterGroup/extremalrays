@@ -40,7 +40,7 @@ Dependencies: numpy, scipy, highspy, with version floors that CI installs and te
 
 ```python
 import numpy as np
-from extremal_rays import exhaustive, sample, verify
+from extremalrays import exhaustive, sample, verify
 
 # four rays in the plane; only the outer two generate the cone
 R = np.array([[1, 0], [2, 1], [1, 1], [0, 1]])
@@ -55,7 +55,7 @@ some, curve = sample(R, work=200)   # cheap certified subset (no completeness)
 
 Rays can also arrive from a file or another library rather than a literal, and any `(n, d)` array-like works: `exhaustive(np.load("rays.npy"))`, or a `scipy.sparse` CSR matrix, which is kept sparse end to end.
 
-Integer input enables exact primitive-vector deduplication and an exact rational fallback in cleanup. Duplicate directions collapse to their first occurrence. A wall-time breakdown of the last call is stored in `extremal_rays.core.LAST_PROFILE`.
+Integer input enables exact primitive-vector deduplication and an exact rational fallback in cleanup. Duplicate directions collapse to their first occurrence. A wall-time breakdown of the last call is stored in `extremalrays.core.LAST_PROFILE`.
 
 For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapshots of the confirmed set (verdicts stay exact; rare separation failures are re-resolved serially), and `checkpoint="state.npz"` saves state atomically every minute. Rerunning the same call resumes from the last checkpoint, guarded by a fingerprint of the input rays.
 
@@ -75,7 +75,7 @@ Both oracles unit-normalize their inputs first. Membership in a cone is scale-fr
 
 The failure mode to watch is a ray going *missing*, since that is the one that breaks generation. A candidate is called redundant when its separation value lands below `tol`, and on badly conditioned cones a genuinely extremal ray can score just under. Three things guard it now. Verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral; float input cannot do that, so it warns instead; and `verify` rechecks the whole answer, escalating borderline rays in both directions. What is left is a real limit rather than an oversight, since no floating-point LP can tell "inside the cone" from "$10^{-15}$ outside it". Pass integer rays when you have them.
 
-The `_SeparationOracle` and `_MembershipOracle` docstrings in [`core.py`](src/extremal_rays/core.py) record the numerical failures that shaped both, and I encourage you to read them.
+The `_SeparationOracle` and `_MembershipOracle` docstrings in [`core.py`](src/extremalrays/core.py) record the numerical failures that shaped both, and I encourage you to read them.
 
 ## Benchmarks
 
@@ -84,14 +84,14 @@ Compared against CYTools, lrs, cddlib and Normaliz on cone families built from t
 **Toric Mori cone**, $h^{1,1} = 3$ to $491$:
 
 <p align="center">
-  <img src="docs/benchmark_prior_art.png" alt="Runtime vs h11 for toric Mori cones: extremalrays alone reaches h11=491"/>
+  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_prior_art.png" alt="Runtime vs h11 for toric Mori cones: extremalrays alone reaches h11=491"/>
 </p>
 
 **Mori-cone cap**, which is the same cone family capped, and much larger: 20,899 rays at
 $h^{1,1}=50$ against 333 for the cone itself. Plotted against ray count, since cap size is not monotonic in $h^{1,1}$:
 
 <p align="center">
-  <img src="docs/benchmark_cap_scaling.png" alt="Runtime vs cap size: extremalrays and CYTools share an exponent, cddlib and lrs do not"/>
+  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_cap_scaling.png" alt="Runtime vs cap size: extremalrays and CYTools share an exponent, cddlib and lrs do not"/>
 </p>
 
 Against CYTools the exponents agree and the gap is a constant of roughly an order of magnitude. Against cddlib and lrs it is the exponent that differs ($n^{2.6}$ and $n^{3.6}$ against $n^{1.34}$), which is why they stop around 1,500 rays.
@@ -111,7 +111,7 @@ The largest run so far is the cap of that same CY: 10,026,843 rays in 491 dimens
 If you use `extremalrays` in your research, please cite it:
 
 ```bibtex
-@software{extremal_rays,
+@software{extremalrays,
   author  = {MacFadden, Nate},
   title   = {extremalrays},
   url     = {https://github.com/LiamMcAllisterGroup/extremalrays},
@@ -122,8 +122,8 @@ If you use `extremalrays` in your research, please cite it:
 ## Organization
 
 ```
-extremal_rays/
-├── src/extremal_rays/
+extremalrays/
+├── src/extremalrays/
 │   ├── core.py                     # exhaustive(): Clarkson sweep, separation + membership oracles, cleanup, checkpoints, workers
 │   ├── inner.py                    # sample(): cheap certified subset via dual-cone facet walks
 │   └── verify.py                   # verify(): independent certificate audit, parallelisable

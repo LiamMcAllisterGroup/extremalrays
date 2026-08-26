@@ -35,7 +35,7 @@ import time
 import numpy as np
 
 # local imports
-from extremal_rays import core, exhaustive, verify
+from extremalrays import core, exhaustive, verify
 
 DATA = pathlib.Path(__file__).parent / "data" / "mori_rays_h11_491.npz"
 

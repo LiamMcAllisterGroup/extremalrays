@@ -31,8 +31,8 @@ import pytest
 from scipy.sparse import csr_matrix
 
 # local imports
-from extremal_rays import exhaustive, verify
-from extremal_rays import core
+from extremalrays import exhaustive, verify
+from extremalrays import core
 from conftest import (brute_force_indices, cytools_reference, grid_face,
                       random_float_rays, random_pointed_rays,
                       random_unimodular)

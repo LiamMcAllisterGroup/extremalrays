@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Run CYTools' extremal_rays on a saved ray matrix, in a fresh
+# Description:  Run CYTools' extremalrays on a saved ray matrix, in a fresh
 #               interpreter. Spawned rather than forked: CYTools parallelises
 #               with joblib, and forking a process that then starts joblib
 #               workers deadlocks. A separate process is also the only way to

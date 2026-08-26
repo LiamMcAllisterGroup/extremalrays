@@ -34,7 +34,7 @@ arithmetic.
 
 The independence is real but bounded, and the docstring of :func:`verify`
 says where it stops: the certificates are built independently of
-:func:`extremal_rays.exhaustive`, but both share this package's
+:func:`extremalrays.exhaustive`, but both share this package's
 preprocessing, so an error inside that shared step is invisible here.
 """
 from __future__ import annotations

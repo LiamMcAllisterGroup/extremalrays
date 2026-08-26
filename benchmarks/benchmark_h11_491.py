@@ -46,8 +46,8 @@ import time
 import numpy as np
 
 # local imports
-import extremal_rays
-from extremal_rays import core, exhaustive, verify
+import extremalrays
+from extremalrays import core, exhaustive, verify
 
 DATA = pathlib.Path(__file__).parent / "data" / "mori_rays_h11_491.npz"
 CAPS = pathlib.Path(__file__).parent.parent / "tests" / "data" / "mori_cap_crosscheck.npz"
@@ -114,7 +114,7 @@ def machine() -> dict:
         "scipy": version("scipy"),
         "highspy": version("highspy"),
         "python_flint": version("flint"),
-        "extremal_rays": extremal_rays.__version__,
+        "extremalrays": extremalrays.__version__,
         "commit": commit,
         "power": power or {"source": "unknown"},
     }
@@ -238,7 +238,7 @@ def main():
               f"{pw.get('low_power_mode')}; wall times are throttled and are "
               "NOT comparable to numbers measured on AC power")
     print("versions: python {python}, numpy {numpy}, scipy {scipy}, "
-          "highspy {highspy}, extremalrays {extremal_rays} "
+          "highspy {highspy}, extremalrays {extremalrays} "
           "({commit})".format(**env))
     print(f"protocol: {args.warmup} warmup + {args.repeat} timed runs per cone\n")
 

@@ -27,8 +27,8 @@ import pytest
 from scipy.sparse import csr_matrix
 
 # local imports
-from extremal_rays import exhaustive
-from extremal_rays import core
+from extremalrays import exhaustive
+from extremalrays import core
 from conftest import grid_face, random_pointed_rays
 
 
