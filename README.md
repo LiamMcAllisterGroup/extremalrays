@@ -63,11 +63,7 @@ Candidate *order* matters for speed. The separation oracle warm-starts between c
 
 ## Algorithm Notes
 
-The first step is to check that $\mathcal{C}$ is pointed and to rescale the rays.
- * Pointedness is desired because a cone containing a linear subspace (i.e., a 'lineality space') has less-clear extremal rays.
- * Rescaling is necessary for our formulation because then (with pointedness), the problem is a polytope-vertex computation, thus enabling our chosen algorithm.
-
-Both of the above can be done with one feasibility LP,
+The first step is to convert the problem of computing extremal rays of $\mathcal{C}$ into a polytope-problem. This requires that $\mathcal{C}$ is pointed (no linear subspaces) so that we can scale the rays all to some affine hyperplane $w\cdot x=1$. We can easily find $w$ using LP,
 
 $$ \text{find } w\in\mathbb{R}^d \quad \text{s.t.} \quad w\cdot r_i \geq 1 \ \ \forall i, $$
 
