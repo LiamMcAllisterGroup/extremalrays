@@ -63,15 +63,19 @@ Candidate *order* matters for speed. The separation oracle warm-starts between c
 
 ## Algorithm Notes
 
-Write $R_1,\dots,R_n\in\mathbb{R}^d$ for the rows of $R$, the generators of $\mathcal{C}$. First we use an LP to find a functional $w\in\mathbb{R}^d$ with $w\cdot R_i\geq 1$ for every $i$. Such a $w$ exists precisely when $\mathcal{C}$ is pointed, so this doubles as the pointedness check. Rescaling each generator to $p_i=R_i/(w\cdot R_i)$ moves it onto the slice $w\cdot x=1$, which turns conic redundancy into point-hull redundancy: $R_i$ is extremal in $\mathcal{C}$ exactly when $p_i$ is a vertex of $\mathrm{conv}\\{p_1,\dots,p_n\\}$.
+The first step is to check that $\mathcal{C}$ is pointed and to rescale the rays. Pointedness is required because a cone containing a line has no well-defined extremal rays. Rescaling changes no verdict, since extremality is scale-free; it is what turns the conic question into a polytope one, and what lets a single `tol` mean the same thing for every ray.
+
+Write $r_1,\dots,r_n\in\mathbb{R}^d$ for the rows of $R$. Both jobs fall out of one feasibility LP,
+
+$$ \text{find } w\in\mathbb{R}^d \quad \text{s.t.} \quad w\cdot r_i \geq 1 \ \ \forall i, $$
+
+solvable exactly when $\mathcal{C}$ is pointed. Its solution fixes the slice $w\cdot x=1$, and $r_i\mapsto r_i/(w\cdot r_i)$ lands every ray on it, so $r_i$ is extremal in $\mathcal{C}$ exactly when it is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$. The oracles then unit-normalize each vector on entry, a separate rescaling that equalizes `tol`: on the $h^{1,1}=491$ cone an extremal ray of slice norm $10^{-4}$ separated by $8\times10^{-8}$ without it, under `tol` and silently dropped, against $7\times10^{-4}$ with it.
 
 Let $E$ be the rays confirmed extremal so far, which starts empty and only grows. A candidate $p$ is tested against it by searching for a linear functional $c\in\mathbb{R}^d$ that separates $p$ from $\mathrm{cone}(E)$:
 
 $$ \max_{c\in\mathbb{R}^d}\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \ \forall e\in E, \quad -1\leq c_i\leq 1, $$
 
-always feasible ($c=0$) and bounded (the box on $c_i$). Value $0$ means $p\in\mathrm{cone}(E)$ by Farkas, so $p$ is redundant, and that verdict holds no matter how incomplete $E$ still is. A positive value says nothing about $p$ itself; it says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot p_i$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
-
-Both oracles unit-normalize their inputs. Cone membership is scale-free so no verdict changes, but it is what makes `tol` mean the same thing for every candidate: the $p_i$ span orders of magnitude under an anisotropic $w$, and on the $h^{1,1}=491$ cone an extremal ray with $|p|\sim10^{-4}$ scored $8\times10^{-8}$ unnormalized, under `tol`, against $7\times10^{-4}$ normalized.
+always feasible ($c=0$) and bounded (the box on $c_i$). Value $0$ means $p\in\mathrm{cone}(E)$ by Farkas, so $p$ is redundant, and that verdict holds no matter how incomplete $E$ still is. A positive value says nothing about $p$ itself; it says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot r_i$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
 
 The failure mode to watch is a ray going *missing*, since that is the one that breaks generation. A candidate is called redundant when its separation value lands below `tol`, and on badly conditioned cones a genuinely extremal ray can score just under. Three things guard it now. Verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral; float input cannot do that, so it warns instead; and `verify` rechecks the whole answer, escalating borderline rays in both directions. What is left is a real limit rather than an oversight, since no floating-point LP can tell "inside the cone" from "$10^{-15}$ outside it". Pass integer rays when you have them.
 
