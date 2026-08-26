@@ -80,7 +80,7 @@ $$ \max_{c\in\mathbb{R}^d}\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \ 
 always feasible ($c=0$) and bounded (the box on $c_i$). Value $0$ means $p\in\mathrm{cone}(E)$ by Farkas, so $p$ is redundant regardless of how incomplete $E$ still is. A positive value says nothing about $p$ itself; it just says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot r_i$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
 
 This computation is generally floating point, so noise and tolerances need to be considered. Explicitly, a ray $r_i$ is said to be redundant when $c\cdot r_i<tol$. On badly conditioned cones, this can fire even for $r_i$ extremal. To guard against this,
-  1) verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral, and
+  1) values $10^{-12}<c\cdot r_i<\texttt{tol}$ are re-checked in exact rational arithmetic when the rays are integral ($10^{-12}$ is a deliberately low noise floor; re-checking a genuinely redundant ray only costs time), and
   2) `verify` rechecks the whole answer, escalating borderline rays in both directions.
 
 By using rational arithmetic, floating point errors are avoided and definitive results can be achieved for integral rays.
