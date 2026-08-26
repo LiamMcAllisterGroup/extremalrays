@@ -14,12 +14,18 @@ concurrency:
 
 jobs:
   test:
-    name: Test (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          # the solver is the whole runtime and ships per-platform wheels,
+          # so exercise macOS too rather than assuming Linux generalizes
+          - os: macos-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,6 +50,48 @@ jobs:
         run: pip install -e ".[test,exact]"
       - name: Test
         run: pytest tests/
+
+  floors:
+    # the declared dependency floors must actually work: without this job
+    # the bounds in pyproject.toml are a guess, and a wrong one is only
+    # discovered by whoever installs into an older environment
+    name: Dependency floors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install declared floors
+        run: |
+          pip install "numpy==1.26.*" "scipy==1.11.*" "highspy==1.7.*" pytest
+          pip install -e . --no-deps
+      - name: Show versions
+        run: python -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
+      - name: Test
+        run: pytest tests/
+
+  benchmark:
+    # the harness asserts the expected extremal counts and runs the audit,
+    # so a numerical or performance regression fails CI rather than waiting
+    # to be noticed in a README number years later
+    name: Benchmark (fixtures)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[test]"
+      - name: Run the harness on the bundled fixtures
+        run: |
+          python benchmarks/bench_mori.py --cones caps --repeat 3 \
+            --verify --json bench.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-fixtures
+          path: bench.json
 
   lint:
     name: Lint (ruff)

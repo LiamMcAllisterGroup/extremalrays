@@ -388,3 +388,120 @@ def test_mori_h11_491_benchmark():
                         "data", "mori_rays_h11_491.npz")
     rays = np.load(path)["rays"].astype(np.int64)
     assert len(exhaustive(rays)) == 884
+
+
+# --- conditioning and scale (regressions) ------------------------------------
+
+# coefficients spanning 1e6: ray 9 is genuinely extremal but its separation
+# value is 3.75e-08, i.e. 0.375x the default tol, so it was silently dropped
+# in the main loop -- the returned set then did not generate the cone.
+ILL_CONDITIONED = np.array([
+    [2, -1000, 200000], [2, 30000, -200], [2, 2000, 2000], [2, -10000, -4],
+    [3, 10000, -50], [2, 4000, 400], [2, 400000, -50000], [2, 50, 5000],
+    [2, 1, 4], [3, 300, 300000], [1, -40, -5], [2, -300000, -300]])
+
+
+def test_near_tol_ray_is_not_dropped():
+    idx = exhaustive(ILL_CONDITIONED)
+    assert idx.tolist() == [0, 6, 9, 11]
+    assert verify(ILL_CONDITIONED, idx)[0]
+    # the exact escalation is what saves it, and it is recorded
+    assert core.LAST_PROFILE["n_near_tol_rescued"] >= 1
+    # a tighter tolerance reaches the same answer without escalating
+    assert exhaustive(ILL_CONDITIONED, tol=1e-9).tolist() == [0, 6, 9, 11]
+
+
+def test_near_tol_float_input_warns():
+    # float rays cannot be re-decided exactly, so the run must at least say
+    # that the tolerance, not the geometry, made the call
+    R = ILL_CONDITIONED * (1.0 + 1e-10)
+    with pytest.warns(UserWarning, match="tol"):
+        exhaustive(R)
+
+
+@pytest.mark.parametrize("scale", [1e-20, 1e-12, 1e-10, 1e-8, 1e8, 1e20])
+def test_float_answer_is_scale_invariant(scale):
+    # scaling every ray leaves the cone unchanged, so the answer must not
+    # move. An absolute integer-snapping tolerance used to collapse small
+    # float rays onto integers (and raise "no nonzero ray" below ~1e-9).
+    rng = np.random.default_rng(0)
+    R = np.column_stack([rng.uniform(1, 2, 12), rng.standard_normal((12, 3))])
+    assert exhaustive(R * scale).tolist() == exhaustive(R).tolist()
+
+
+def test_mixed_scale_rows_do_not_change_the_answer():
+    rng = np.random.default_rng(0)
+    R = np.column_stack([rng.uniform(1, 2, 12), rng.standard_normal((12, 3))])
+    mixed = R.copy()
+    mixed[[1, 3, 5, 7]] *= 1e-10  # same directions, wildly different norms
+    assert exhaustive(mixed).tolist() == exhaustive(R).tolist()
+
+
+# --- the cleanup removal path ------------------------------------------------
+#
+# Floating-point tie-breaking can admit a redundant ray into E; cleanup is the
+# safety net that takes it back out, and it is the justification for the whole
+# tie-breaking design. On well-conditioned cones it essentially never fires
+# (searching grids, cubes and 60 random cones found no case where cleanup=True
+# and cleanup=False differ), so the branch is forced here rather than waited
+# for: _shoot is patched to admit a ray that is provably redundant.
+
+REDUNDANT_CONE = np.array([[1, 0], [0, 1], [1, 1]])  # ray 2 = ray 0 + ray 1
+
+
+def _force_admitting(monkeypatch, victim, tied=True):
+    """Make the first ray-shoot admit `victim`, flagged as tie-admitted."""
+    real = core._shoot
+    state = {"done": False}
+
+    def fake(P, c, cand, rel_tol=1e-9, all_vals=None):
+        if not state["done"] and victim in cand:
+            state["done"] = True
+            return victim, tied
+        return real(P, c, cand, rel_tol, all_vals)
+
+    monkeypatch.setattr(core, "_shoot", fake)
+
+
+def test_cleanup_removes_a_tie_admitted_redundant_ray(monkeypatch, capsys):
+    _force_admitting(monkeypatch, victim=2)
+    idx = core.exhaustive(REDUNDANT_CONE, seed_shots=0, verbosity=1)
+    out = capsys.readouterr().out
+    assert idx.tolist() == [0, 1], "the redundant ray must not survive cleanup"
+    assert "removed redundant ray" in out
+    assert core.LAST_PROFILE["n_lp_cleanup"] >= 1
+    assert core.LAST_PROFILE["cleanup_membership_lp"] > 0.0
+    assert verify(REDUNDANT_CONE, idx)[0]
+
+
+def test_cleanup_disabled_keeps_the_impostor(monkeypatch):
+    # the same forced admission, with cleanup off: the ray stays, so the
+    # result still generates the cone but is no longer minimal
+    _force_admitting(monkeypatch, victim=2)
+    idx = core.exhaustive(REDUNDANT_CONE, seed_shots=0, cleanup=False)
+    assert idx.tolist() == [0, 1, 2]
+    ok, report = verify(REDUNDANT_CONE, idx)
+    assert not ok and any("redundant" in f for f in report["failures"])
+
+
+def test_cleanup_keeps_an_uncertifiable_suspect_and_warns(monkeypatch):
+    # if no membership certificate can be obtained, removing the ray would be
+    # unsound, so cleanup must keep it and say so -- the conservative branch
+    _force_admitting(monkeypatch, victim=2)
+
+    class NoCertificate(core._MembershipOracle):
+        def residual(self, p):
+            return np.inf, None            # solver cannot certify anything
+
+    monkeypatch.setattr(core, "_MembershipOracle", NoCertificate)
+    with pytest.warns(UserWarning, match="borderline"):
+        idx = core.exhaustive(REDUNDANT_CONE, seed_shots=0)
+    assert idx.tolist() == [0, 1, 2], "an uncertified suspect must be kept"
+
+
+def test_cleanup_skips_rays_admitted_as_unique_maximizers(monkeypatch):
+    # a ray admitted as the UNIQUE maximizer of some functional is provably
+    # extremal, so it must never reach the cleanup retest
+    _force_admitting(monkeypatch, victim=2, tied=False)
+    core.exhaustive(REDUNDANT_CONE, seed_shots=0)
+    assert core.LAST_PROFILE["n_suspects"] == 0

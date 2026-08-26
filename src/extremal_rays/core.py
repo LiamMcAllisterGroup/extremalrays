@@ -23,6 +23,28 @@
 #               constructively by ray shooting, never by an infeasibility
 #               proof.
 # -----------------------------------------------------------------------------
+"""
+Extremal rays of pointed polyhedral cones, via Clarkson's output-sensitive
+algorithm.
+
+The public entry point is :func:`exhaustive`, which returns the indices of
+the unique minimal generating subset of the input rays. Candidates are
+tested only against the set of already-confirmed extremal rays, using small
+separation LPs that are always feasible and bounded; extremality is
+established constructively by ray shooting and never through an
+infeasibility proof. :func:`positive_functional` exposes the pointedness
+certificate the algorithm builds on.
+
+The two workhorses are :class:`_SeparationOracle` (is this ray outside the
+cone of the confirmed set?) and :class:`_MembershipOracle` (is this ray a
+non-negative combination of those rays?). Both are persistent HiGHS models
+and both carry docstrings explaining the numerical failure modes that shaped
+them -- start there when changing anything about tolerances.
+
+A wall-time and LP-count breakdown of the most recent :func:`exhaustive`
+call is left in :data:`LAST_PROFILE`; ``closest_member`` and
+``closest_separated`` in particular say how much work the tolerance did.
+"""
 from __future__ import annotations
 
 # stdlib imports
@@ -54,6 +76,45 @@ _CG_ROUNDS = 60          # rounds before giving up (suggest w=)
 
 _CLEANUP_LP_TIME_LIMIT = 60.0  # seconds per membership-certificate LP
 
+# HiGHS options for the separation oracle. Only the objective changes between
+# candidate tests, which leaves the incumbent basis PRIMAL feasible and dual
+# infeasible -- so primal simplex (strategy 4) resumes from it directly, while
+# the default (1, dual plain) must re-establish dual feasibility every solve.
+# Measured on the h11=491 Mori cone: 12.6 s vs 22.2 s for 3123 LPs, with a
+# byte-identical index set, and identical answers across 49 cones (fixtures,
+# random, tie-heavy, float, sparse, degenerate). `presolve="off"` is
+# deliberately NOT set: it adds only ~2% on top of this (inside noise) and is
+# slower than the default on its own, which does not justify giving up a
+# numerical safety net on degenerate input.
+_HIGHS_OPTIONS = {"simplex_strategy": 4}
+
+# residual below which a membership reconstruction counts as certified.
+# Applied to the unit-normalized question (see _MembershipOracle), so it is
+# scale-free; a ray is only ever REMOVED on such a certificate, making a
+# strict value the sound direction (at worst the result is non-minimal).
+_MEMBERSHIP_RESID_TOL = 1e-9
+
+# The ambiguous band. A separation value of exactly zero means "in the cone";
+# genuinely redundant rays land at the solver's noise floor, ~1e-13 relative
+# to a unit-normalized ray. Anything meaningfully above that but still under
+# tol is a ray the tolerance -- not the geometry -- is about to discard, and
+# the failure is silent and one-directional: the dropped ray is extremal and
+# the result no longer generates the cone.
+#
+# Values seen in the band: 7.07e-10 for the third generator of the simplicial
+# cone [[1e9,0,0],[0,1e9,0],[1e9,1e9,1]] (dropped, and the old audit blessed
+# the loss), 3.75e-08 for a 12-ray cone spanning 1e6. Both are >= 1e-12 while
+# true members stay near 1e-13, so this floor separates them by orders of
+# magnitude rather than by a hair.
+#
+# Verdicts inside the band are re-decided in exact rational arithmetic when
+# the rays are integral, and always reported.
+_AMBIGUOUS_BAND = 1e-12
+
+# ray shooting takes a candidate submatrix instead of a full matvec once the
+# unresolved set is below n / this. See _shoot.
+_SUBMATRIX_SHARE = 10
+
 
 # -----------------------------------------------------------------------------
 # preprocessing
@@ -63,11 +124,23 @@ def _as_integer(R: np.ndarray) -> "np.ndarray | None":
     """
     Return an integer copy of ``R``, or None if ``R`` is genuinely
     non-integral.
+
+    The test is RELATIVE (rtol, atol=0), so an entry only counts as
+    integral when it is close to its own rounded value in proportion to
+    that value. An absolute tolerance here silently reinterprets small
+    float data as integers: with atol=1e-9, [[1, 1e-10], [1, -1e-10]]
+    snapped to two copies of [1, 0] (distinct rays collapsed into one)
+    and [[1e-10, 2e-10]] snapped to the zero ray (annihilating a cone),
+    so a legitimate float cone scaled by 1e-10 raised "no nonzero ray"
+    while the same cone at scale 1 worked. With atol=0 a nonzero entry
+    can never round to zero, and genuinely near-integral floats -- the
+    reason to snap at all, e.g. 3 arriving as 2.9999999999999996 from a
+    matrix product -- still qualify.
     """
     if np.issubdtype(R.dtype, np.integer):
         return R.astype(np.int64)
     Rr = np.round(R)
-    if (np.allclose(R, Rr, rtol=0, atol=1e-9)
+    if (np.allclose(R, Rr, rtol=1e-12, atol=0.0)
             and np.abs(Rr).max(initial=0.0) < 2.0 ** 53):
         return Rr.astype(np.int64)
     return None
@@ -207,7 +280,10 @@ def _unique_primitive(R: np.ndarray) -> "tuple[np.ndarray, np.ndarray]":
         orig = np.flatnonzero(nonzero)
     else:
         norms = np.linalg.norm(R, axis=1)
-        nonzero = norms > 1e-12
+        # only an exactly zero row is not a ray: a direction is scale-free,
+        # so an absolute floor here would delete legitimate rays of a
+        # uniformly small cone (and raise "no nonzero ray" for R * 1e-20)
+        nonzero = norms > 0
         prim = R[nonzero] / norms[nonzero, None]
         orig = np.flatnonzero(nonzero)
 
@@ -291,13 +367,17 @@ def positive_functional(R: ArrayLike) -> np.ndarray:
         # round stays exact and fast (an infeasible subsystem certifies
         # non-pointedness of the whole)
         rng = np.random.default_rng(0)
-        S = np.sort(rng.choice(n, _CG_BATCH * d, replace=False))
+        # the subset and the growth step must both stay inside n: with a
+        # very wide cone (d > n / _CG_BATCH) an unclamped size raises from
+        # rng.choice and np.argpartition instead of just sampling everything
+        batch = min(_CG_BATCH * d, n)
+        S = np.sort(rng.choice(n, batch, replace=False))
         for _ in range(_CG_ROUNDS):
             w = _pf_lp(R[S])
             m = R @ w
             if m.min() > 0:
                 return w / m.min()  # rescale: R @ w >= 1 everywhere
-            worst = np.argpartition(m, _CG_BATCH * d)[:_CG_BATCH * d]
+            worst = np.argpartition(m, min(batch, n - 1))[:batch]
             S = np.union1d(S, worst[m[worst] < 1])
         raise RuntimeError(
             f"constraint generation did not converge in {_CG_ROUNDS} "
@@ -392,6 +472,8 @@ class _SeparationOracle:
     def _fresh(self) -> None:
         self.h = highspy.Highs()
         self.h.silent()
+        for name, value in _HIGHS_OPTIONS.items():
+            self.h.setOptionValue(name, value)
         self.h.addVars(self.d, np.full(self.d, -1.0), np.full(self.d, 1.0))
         for nz, vals in self._rows:
             self.h.addRow(-_INF, 0.0, len(nz), nz, vals)
@@ -423,6 +505,15 @@ class _SeparationOracle:
 
         Raises on any repeated non-optimal solver status: a solver failure
         must never be silently interpreted as a verdict.
+
+        c = 0 is always feasible, so the true optimum is >= 0, but a
+        warm-started solve can return a small NEGATIVE value: on the
+        simplicial cone [[1e9,0,0],[0,1e9,0],[1e9,1e9,1]] it returns
+        -7.07e-10 where a cold solve gives +7.07e-10. The sign is an
+        artifact; the MAGNITUDE is the signal, and callers test |val|
+        against _AMBIGUOUS_BAND for exactly that reason. Re-solving cold
+        to clean up the sign was measured 3x slower overall (it discards
+        the warm start on every noisy solve) and buys nothing.
         """
         p = _unit(np.asarray(p, dtype=float))
         for _ in range(2):
@@ -436,6 +527,102 @@ class _SeparationOracle:
         raise RuntimeError("separation LP not optimal after model rebuild")
 
 
+class _MembershipOracle:
+    """
+    Persistent LP  E^T lam = p,  lam >= 0: is p a non-negative combination
+    of the rows of E?
+
+    Columns are the coefficients lam (zero cost -- this is pure
+    feasibility); one equality row per coordinate carries E^T lam = p, and
+    only the row bounds change between queries. Changing the right-hand
+    side preserves DUAL feasibility of the incumbent basis, so HiGHS's
+    default dual simplex resumes from it -- the mirror image of
+    _SeparationOracle, where only the objective moves and primal simplex
+    is the right choice.
+
+    The alternative, one fresh scipy.optimize.linprog per candidate,
+    re-converts the whole coefficient matrix every call: measured 1.6x
+    slower (24.8 vs 15.7 ms per LP over 400 candidates against 884 rows).
+
+    The basis is deliberately DISCARDED between queries. Keeping it is
+    another 7x faster (2.1 ms per LP), but it makes the verdict depend on
+    query history: on a cone where a ray sits ~1e-15 outside cone(E), a
+    cold solve proves infeasibility while a warm one returns a
+    1.7e-15-residual certificate, so the same question answered yes or no
+    depending on what was asked before it. Every caller here either
+    removes a ray or issues an audit verdict, and neither may depend on
+    iteration order. Tightening the feasibility tolerances does not fix
+    it (1e-10 agrees, 1e-12 disagrees again -- coincidence, not a rule).
+
+    Verdicts are returned as reconstruction residuals, never as solver
+    status codes: a caller decides membership by checking E^T lam against
+    p itself, and an unsolved LP yields inf (no certificate) rather than a
+    claim in either direction.
+    """
+
+    def __init__(self, E: np.ndarray, time_limit: "float | None" = None):
+        self.E = np.ascontiguousarray(E, dtype=float)
+        self.m, self.d = self.E.shape
+        self.time_limit = time_limit
+        self._row_idx = np.arange(self.d, dtype=np.int32)
+        self._fresh()
+        # the batch row-bounds call only appears in recent highspy (absent
+        # in 1.11 and earlier); fall back to the per-row call, which costs
+        # d cheap C calls per query -- a few percent of one solve
+        self._set_rhs = (self._set_rhs_batch
+                         if hasattr(self.h, "changeRowsBounds")
+                         else self._set_rhs_loop)
+
+    def _fresh(self) -> None:
+        self.h = highspy.Highs()
+        self.h.silent()
+        if self.time_limit is not None:
+            self.h.setOptionValue("time_limit", float(self.time_limit))
+        self.h.addVars(self.m, np.zeros(self.m), np.full(self.m, _INF))
+        for i in range(self.d):
+            col = self.E[:, i]
+            nz = np.flatnonzero(col).astype(np.int32)
+            self.h.addRow(0.0, 0.0, len(nz), nz, col[nz])
+
+    def _set_rhs_batch(self, p: np.ndarray) -> None:
+        self.h.changeRowsBounds(self.d, self._row_idx, p, p)
+
+    def _set_rhs_loop(self, p: np.ndarray) -> None:
+        for i in range(self.d):
+            self.h.changeRowBounds(i, p[i], p[i])
+
+    def residual(self, p: np.ndarray) -> "tuple[float, np.ndarray | None]":
+        """
+        Return ``(resid, lam)``: the worst-coordinate reconstruction error
+        of E^T lam against p, and the coefficients. A proven-infeasible or
+        unsolved LP gives ``(inf, None)`` -- no certificate, which is the
+        sound direction for an audit.
+
+        The question is asked about p/|p| (membership in a cone is
+        scale-free), so the residual is comparable across candidates
+        whatever their magnitude and a fixed tolerance means the same
+        thing for each -- as in _SeparationOracle. Slice coordinates span
+        orders of magnitude under an anisotropic w, where an absolute
+        threshold is simultaneously too strict for large p and too
+        permissive for small p. lam is returned for the normalized
+        question; it is used only through its support, which scaling does
+        not change.
+        """
+        p = _unit(np.ascontiguousarray(p, dtype=float))
+        for _ in range(2):
+            self.h.clearSolver()  # history-independent verdicts; see above
+            self._set_rhs(p)
+            self.h.run()
+            status = self.h.getModelStatus()
+            if status == highspy.HighsModelStatus.kOptimal:
+                lam = np.array(self.h.getSolution().col_value, dtype=float)
+                return float(np.abs(self.E.T @ lam - p).max()), lam
+            if status == highspy.HighsModelStatus.kInfeasible:
+                return np.inf, None  # a verdict: p is outside cone(E)
+            self._fresh()  # solver trouble: rebuild once, then give up
+        return np.inf, None
+
+
 # -----------------------------------------------------------------------------
 # ray shooting
 # -----------------------------------------------------------------------------
@@ -443,7 +630,8 @@ class _SeparationOracle:
 def _shoot(P,
            c: np.ndarray,
            cand: np.ndarray,
-           rel_tol: float = 1e-9) -> "tuple[int, bool]":
+           rel_tol: float = 1e-9,
+           all_vals: "np.ndarray | None" = None) -> "tuple[int, bool]":
     """
     Lexicographically tie-broken maximizer of P[cand] @ c.
 
@@ -454,8 +642,19 @@ def _shoot(P,
     of conv(P) -- no cleanup retest needed. Only tie-broken results
     (``tied=True``) can be corrupted by floating point and require the
     cleanup pass.
+
+    ``all_vals`` supplies P @ c when the caller already has it (seeding
+    computes every shot in one matmul), skipping the matvec entirely.
     """
-    vals = (P @ c)[cand]  # full matvec: no candidate-submatrix copy
+    if all_vals is not None:
+        vals = all_vals[cand]
+    elif len(cand) * _SUBMATRIX_SHARE < P.shape[0]:
+        # few candidates left: copying their rows beats a full matvec.
+        # Measured crossover at ~10% of n for 3509x491 (below that the copy
+        # is up to 20x cheaper; above it the full matvec wins by ~2x).
+        vals = _rows(P, cand) @ c
+    else:
+        vals = (P @ c)[cand]  # full matvec: no candidate-submatrix copy
     atol = rel_tol * max(1.0, float(np.abs(vals).max()))
     T = cand[vals >= vals.max() - atol]
     tied = len(T) > 1
@@ -505,15 +704,22 @@ def _exact_membership(r: np.ndarray,
         M = flint.fmpq_mat([row + [rhs] for row, rhs in zip(A, b)])
         M = M.rref()[0]
         x = [Fraction(0)] * ncol
+        # in a reduced row echelon form the pivot columns strictly increase
+        # down the rows, and every row after the last pivot is zero. Scanning
+        # each row from column 0 costs O(d * ncol) flint element reads;
+        # resuming from the previous pivot makes the whole sweep O(ncol + d).
+        start = 0
         for q in range(d):
-            lead = next((c for c in range(ncol + 1) if M[q, c] != 0), None)
+            lead = next((c for c in range(start, ncol + 1) if M[q, c] != 0),
+                        None)
             if lead is None:
-                continue
+                break  # a zero row: everything below it is zero too
             if lead == ncol:  # 0 = nonzero: inconsistent
                 return False
             # particular solution with free variables at zero (both paths)
             v = M[q, ncol] / M[q, lead]
             x[lead] = Fraction(int(v.p), int(v.q))
+            start = lead + 1
         return all(v >= 0 for v in x)
     except ImportError:
         pass
@@ -599,6 +805,19 @@ def _ckpt_load(path: str, fingerprint: str) -> "dict | None":
     return None
 
 
+def _is_worker_process() -> bool:
+    """
+    True inside a spawned/forked child of this package's pool.
+
+    Used to refuse to nest pools: spawn re-imports the caller's module in
+    every child, so a caller without an ``if __name__ == "__main__":``
+    guard would otherwise re-enter exhaustive() and spawn again.
+    """
+    import multiprocessing
+    parent = getattr(multiprocessing, "parent_process", None)
+    return parent is not None and parent() is not None
+
+
 _POOL = {}  # per-worker-process state
 
 
@@ -645,16 +864,38 @@ def _pool_sweep(args):
     """
     chunk, E_idx, tol = args
     P = _POOL["P"]
-    oracle = _SeparationOracle(P.shape[1])
-    for e in E_idx:
+    # Keep the oracle between chunks and extend it, rather than rebuilding
+    # it every time. E only grows and its rows are appended in order, so a
+    # snapshot is always a prefix of a later one; a worker that already has
+    # MORE rows than this snapshot may keep them, because membership in
+    # cone(E) is monotone in E -- a "redundant" verdict against a superset
+    # of the live E is still a redundant verdict.
+    #
+    # Rebuilding cost the large jobs dearly: at 10M candidates with
+    # |E| ~ 1218 and 2000-row chunks that is ~6 million wasted addRow calls,
+    # which is most of why 8 workers returned only ~1.9x there.
+    oracle = _POOL.get("oracle")
+    if oracle is None:
+        oracle = _POOL["oracle"] = _SeparationOracle(P.shape[1])
+        # One solver thread per worker. HiGHS defaults to threads=0 (auto)
+        # with simplex_max_concurrency=8, so N worker processes can ask for
+        # 8N threads -- 64 on an 8-worker sweep, against 10 cores here. The
+        # processes already supply the parallelism; letting each solver
+        # oversubscribe on top of that is how a sweep ends up spending its
+        # time in the scheduler instead of the simplex.
+        oracle.h.setOptionValue("threads", 1)
+        _POOL["n_rows"] = 0
+    for e in E_idx[_POOL["n_rows"]:]:
         oracle.add_row(_row(P, int(e)), int(e))
+    _POOL["n_rows"] = max(_POOL["n_rows"], len(E_idx))
     redundant, failed = [], []
     for k in chunk:
         p = _row(P, int(k))
         val, _ = oracle.separate(p)
-        if val <= tol:
+        if abs(val) <= _AMBIGUOUS_BAND:
             redundant.append(int(k))
         else:
+            # includes near-tol members: resolve() re-decides those exactly
             failed.append(int(k))
     return redundant, failed
 
@@ -722,6 +963,18 @@ def exhaustive(R: ArrayLike,
         of E ("redundant" verdicts stay valid because E only grows); the
         rare separation failures are re-resolved serially against the live
         E. 0 runs fully serially. Defaults to 0.
+
+        Workers are spawned (not forked), so a script that passes
+        ``n_workers > 0`` MUST guard its entry point with
+        ``if __name__ == "__main__":`` -- without it each worker re-imports
+        and re-executes the caller module, producing recursive runs and
+        leaked shared-memory segments. The rays are exported to shared
+        memory for the duration of the call and unlinked before it returns.
+
+        Parallel sweeping trades CPU for wall time and only pays off on
+        long jobs: at the ~13 s benchmark scale it is slightly slower in
+        wall time AND costs roughly 2x the CPU-seconds, so on a shared
+        machine prefer serial there. See the README's Limitations.
     checkpoint : str | None, optional
         Path for periodic atomic state saves. A rerun with the same rays
         and path resumes from the last checkpoint (at most ~60s of work is
@@ -771,6 +1024,8 @@ def exhaustive(R: ArrayLike,
     )}
     prof["n_lp_main"] = prof["n_lp_cleanup"] = prof["n_shoot"] = 0
     prof["n_suspects"] = 0
+    prof["n_exact_checks"] = prof["n_near_tol_rescued"] = 0
+    prof["n_ambiguous"] = 0
     # largest value ruled a member / smallest value ruled separated: the
     # two should be far apart; a small gap means tol is doing real work
     closest = {"member": 0.0, "separated": np.inf}
@@ -875,10 +1130,14 @@ def exhaustive(R: ArrayLike,
     if seed_shots and not resumed:
         rng = np.random.default_rng(rng_seed)
         C = rng.standard_normal((d, seed_shots))
+        # every shot in one matmul: 982 separate matvecs measured 437 ms on
+        # the h11=491 cone against 10 ms for the single GEMM (45x), and the
+        # argmaxes are identical
+        V = np.asarray(P @ C)
         all_idx = np.arange(n)
         hits = {}  # index -> tied on every shot that produced it
         for k in range(seed_shots):
-            j, tied = _shoot(P, C[:, k], all_idx)
+            j, tied = _shoot(P, C[:, k], all_idx, all_vals=V[:, k])
             hits[j] = hits.get(j, True) and tied
         for j in sorted(hits):
             if status[j] == 0:  # may already be in E via `known`
@@ -908,6 +1167,24 @@ def exhaustive(R: ArrayLike,
                 "no checkpoint path is set; pass checkpoint= to make this "
                 "run resumable")
 
+    def exact_member(i):
+        """
+        Re-decide a near-tol "redundant" verdict in exact arithmetic.
+
+        Returns True only if r_i is provably a non-negative combination of
+        the confirmed rays over the rationals. Integer input only; the
+        float LP supplies the support, whose positive row scalings are the
+        same in slice and original coordinates.
+        """
+        lam = _MembershipOracle(_rows(P, E),
+                                time_limit=_CLEANUP_LP_TIME_LIMIT).residual(
+                                    _row(P, i))[1]
+        if lam is None:
+            return False
+        prof["n_exact_checks"] += 1
+        return _exact_membership(_row(R_int, rep[i]),
+                                 _rows(R_int, rep[E]), lam)
+
     def resolve(i):
         """One Clarkson resolution: redundant, or E grows until i is shot."""
         nonlocal n_lp
@@ -919,10 +1196,19 @@ def exhaustive(R: ArrayLike,
             n_lp += 1
             prof["n_lp_main"] += 1
             if val <= tol:
-                status[i] = -1
-                closest["member"] = max(closest["member"], val)
-                return
-            closest["separated"] = min(closest["separated"], val)
+                # a verdict this close to the threshold is not safe to take
+                # on faith; for integer input, settle it exactly instead
+                if abs(val) > _AMBIGUOUS_BAND:
+                    prof["n_ambiguous"] += 1
+                if (abs(val) > _AMBIGUOUS_BAND and R_int is not None
+                        and E and not exact_member(i)):
+                    prof["n_near_tol_rescued"] += 1
+                else:
+                    status[i] = -1
+                    closest["member"] = max(closest["member"], abs(val))
+                    return
+            else:
+                closest["separated"] = min(closest["separated"], val)
             t0 = time.perf_counter()
             j, tied = _shoot(P, c, np.flatnonzero(status == 0))
             prof["main_ray_shoot"] += time.perf_counter() - t0
@@ -931,6 +1217,19 @@ def exhaustive(R: ArrayLike,
             if j == i:
                 return
         raise RuntimeError(f"failed to resolve candidate {i}")
+
+    if n_workers and _is_worker_process():
+        # A caller that passes n_workers>0 without an
+        # `if __name__ == "__main__":` guard has every spawned child
+        # re-import its module and call this again; without this check that
+        # recurses until the process table gives out. Degrade instead.
+        warnings.warn(
+            "n_workers > 0 was requested inside a worker process, which "
+            "means the calling module is missing an "
+            '`if __name__ == "__main__":` guard. Sweeping serially in this '
+            "process instead. Add the guard to enable parallel sweeps."
+        )
+        n_workers = 0
 
     if n_workers:
         # workers pull chunks against frozen E snapshots (valid: E only
@@ -1020,24 +1319,14 @@ def exhaustive(R: ArrayLike,
             # pathologies on degenerate geometries, and an uncertified
             # suspect is kept (sound), so a bounded attempt suffices
             t0 = time.perf_counter()
-            Po = _rows(P, others)
-            res = linprog(
-                c=np.zeros(len(others)),
-                A_eq=Po.T,
-                b_eq=pe,
-                bounds=[(0, None)],
-                method="highs",
-                options={"time_limit": _CLEANUP_LP_TIME_LIMIT},
-            )
-            resid = (
-                float(np.abs(Po.T @ res.x - pe).max())
-                if res.success else np.inf
-            )
+            oracle_m = _MembershipOracle(
+                _rows(P, others), time_limit=_CLEANUP_LP_TIME_LIMIT)
+            resid, lam = oracle_m.residual(pe)
             prof["cleanup_membership_lp"] += time.perf_counter() - t0
-            certified = res.success and resid < 1e-6
-            if not certified and R_int is not None and res.success:
+            certified = resid < _MEMBERSHIP_RESID_TOL
+            if not certified and R_int is not None and lam is not None:
                 certified = _exact_membership(
-                    _row(R_int, rep[e]), _rows(R_int, rep[others]), res.x
+                    _row(R_int, rep[e]), _rows(R_int, rep[others]), lam
                 )
             if certified:
                 E.remove(e)
@@ -1052,6 +1341,20 @@ def exhaustive(R: ArrayLike,
                     "it -- the result generates the cone but may not be "
                     "minimal. Consider verify()."
                 )
+
+    # An ambiguous verdict means the tolerance, not the geometry, made the
+    # call. For integer rays those were already settled in exact arithmetic
+    # above, so there is nothing to warn about; for float rays no exact path
+    # exists and this warning is the only signal the caller gets.
+    if closest["member"] > _AMBIGUOUS_BAND and R_int is None:
+        warnings.warn(
+            f"{prof['n_ambiguous']} redundancy verdict(s) landed between the "
+            f"solver noise floor and tol (worst {closest['member']:.2e} vs "
+            f"tol {tol:.1e}), so the tolerance decided them rather than the "
+            "geometry, and extremal rays may be missing. Float rays cannot "
+            "be re-decided exactly: pass integer rays to enable that, or "
+            "re-run with a smaller tol, and audit with verify()."
+        )
 
     save_ckpt()
     prof["closest_member"] = closest["member"]

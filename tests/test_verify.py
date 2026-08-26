@@ -36,7 +36,7 @@ def test_verify_catches_wrong_answers():
     ok, report = verify(R, [0])  # missing an extremal ray
     assert not ok and any("membership" in f for f in report["failures"])
     ok, report = verify(R, [0, 1, 2])  # including a redundant ray
-    assert not ok and any("separation" in f for f in report["failures"])
+    assert not ok and any("redundant" in f for f in report["failures"])
     ok, report = verify(R, [0, 2])  # correct answer
     assert ok and report["failures"] == []
     assert report["worst_membership_residual"] < 1e-9
@@ -102,3 +102,84 @@ def test_verify_time_limit_option():
     R = random_pointed_rays(5, n=40, d=4)
     idx = exhaustive(R)
     assert verify(R, idx, time_limit=30.0)[0]
+
+
+# --- near-tolerance geometry -------------------------------------------------
+
+# a cone whose coefficients span 1e6: ray 9 is genuinely extremal but sits so
+# close to cone(the others) that its separation margin is 3.75e-08, below the
+# default sep_tol. verify must still accept it -- a nearly-redundant ray is a
+# ray -- and must still reject the answer that omits it.
+ILL_CONDITIONED = np.array([
+    [2, -1000, 200000], [2, 30000, -200], [2, 2000, 2000], [2, -10000, -4],
+    [3, 10000, -50], [2, 4000, 400], [2, 400000, -50000], [2, 50, 5000],
+    [2, 1, 4], [3, 300, 300000], [1, -40, -5], [2, -300000, -300]])
+ILL_TRUTH = [0, 6, 9, 11]
+
+
+def test_verify_accepts_narrow_margin_extremal_ray():
+    ok, report = verify(ILL_CONDITIONED, ILL_TRUTH)
+    assert ok, report["failures"]
+    # the margin really is below sep_tol: the escalation is what saved it
+    assert report["worst_separation_margin"] < 1e-7
+
+
+def test_verify_rejects_answer_missing_a_narrow_margin_ray():
+    ok, report = verify(ILL_CONDITIONED, [0, 6, 11])
+    assert not ok and any("membership" in f for f in report["failures"])
+
+
+def test_verify_sep_tol_escalation_is_reachable():
+    # with escalation disabled (sep_tol=0) the narrow ray passes on margin
+    # alone; with the default it passes via the membership check. Either way
+    # the verdict is the same -- the parameter only chooses the evidence.
+    assert verify(ILL_CONDITIONED, ILL_TRUTH, sep_tol=0.0)[0]
+    assert verify(ILL_CONDITIONED, ILL_TRUTH)[0]
+
+
+def test_verify_accepts_supplied_w():
+    R = random_pointed_rays(5, n=40, d=4)
+    idx = exhaustive(R)
+    assert verify(R, idx, w=[1, 0, 0, 0])[0]
+    with pytest.raises(ValueError, match="not positive"):
+        verify(R, idx, w=[0, 1, 0, 0])
+
+
+# --- parallel audit ----------------------------------------------------------
+#
+# Once the claimed result is fixed, every candidate is an independent
+# question, so the audit parallelises cleanly. The verdicts must be
+# byte-identical to the serial ones -- a faster audit that disagrees with the
+# slow one is worthless.
+
+@pytest.mark.parametrize("trial", range(2))
+def test_parallel_audit_matches_serial(trial):
+    R = random_pointed_rays(60 + trial, n=70, d=5)
+    idx = exhaustive(R)
+    ok_s, rep_s = verify(R, idx)
+    ok_p, rep_p = verify(R, idx, n_workers=2)
+    assert ok_s and ok_p
+    assert rep_s["failures"] == rep_p["failures"] == []
+    assert rep_s["worst_membership_residual"] == pytest.approx(
+        rep_p["worst_membership_residual"], abs=1e-12)
+
+
+def test_parallel_audit_still_rejects_wrong_answers():
+    R = random_pointed_rays(62, n=70, d=5)
+    idx = exhaustive(R)
+    assert not verify(R, idx[1:], n_workers=2)[0]          # a ray missing
+    extra = [k for k in range(len(R)) if k not in idx][0]
+    assert not verify(R, np.append(idx, extra), n_workers=2)[0]  # one too many
+
+
+def test_parallel_audit_catches_the_near_tolerance_case():
+    # the exact escalation must survive the round trip through workers
+    assert verify(ILL_CONDITIONED, ILL_TRUTH, n_workers=2)[0]
+    assert not verify(ILL_CONDITIONED, [0, 6, 11], n_workers=2)[0]
+
+
+def test_parallel_audit_falls_back_for_sparse_input():
+    # the shared-memory path is dense-only; sparse input must still work
+    R = random_pointed_rays(63, n=50, d=4)
+    idx = exhaustive(R)
+    assert verify(csr_matrix(R), idx, n_workers=2)[0]

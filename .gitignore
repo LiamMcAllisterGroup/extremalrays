@@ -21,3 +21,16 @@ dist/
 # checkpoints written by exhaustive(checkpoint=...)
 *.npz.tmp
 *.npz.bak
+
+# polytope tables fetched by benchmarks/make_cones.py (3.7 MB, re-downloadable
+# from the Kreuzer-Skarke dataset on Hugging Face); the cones derived from them
+# are committed instead
+benchmarks/data/polytopes-4d-*.parquet
+
+# benchmark scratch: logs and probe scripts are transient, but the measured
+# results the figures are built from are worth keeping
+perf-work/*
+!perf-work/*.json
+
+# repo-review output (regenerable tool output)
+repo-review-out/

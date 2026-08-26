@@ -44,6 +44,18 @@ from conftest import random_pointed_rays
 
 # --- integer detection -------------------------------------------------------
 
+def test_as_integer_does_not_snap_small_floats():
+    # an absolute tolerance here silently reinterpreted float data as
+    # integers: distinct rays collapsed onto one another, and small rays
+    # were annihilated outright
+    assert _as_integer(np.array([[1.0, 1e-10], [1.0, -1e-10]])) is None
+    assert _as_integer(np.array([[1e-10, 2e-10]])) is None
+    assert _as_integer(np.array([[1.0, 1e-300]])) is None
+    # ... while genuinely near-integral floats still qualify
+    assert _as_integer(np.array([[2.9999999999999996, 4.0]])).tolist() == [[3, 4]]
+    assert _as_integer(np.array([[1e-10, 2e-10]]) * 1e10).tolist() == [[1, 2]]
+
+
 def test_as_integer():
     assert _as_integer(np.array([[1, 2]])).dtype == np.int64
     assert _as_integer(np.array([[1.0, 2.0]])).tolist() == [[1, 2]]
@@ -180,6 +192,37 @@ def test_separation_oracle_rebuild_preserves_state():
     assert abs(val) < 1e-9
 
 
+def test_oracle_sets_primal_simplex():
+    # only the objective changes between solves, so the basis stays primal
+    # feasible; strategy 4 (primal) resumes from it, the default 1 (dual)
+    # does not. guards the option against a silent revert to the default.
+    assert core._HIGHS_OPTIONS["simplex_strategy"] == 4
+    o = _SeparationOracle(3)
+    assert o.h.getOptionValue("simplex_strategy")[1] == 4
+    o._fresh()  # the rebuild path must re-apply the options
+    assert o.h.getOptionValue("simplex_strategy")[1] == 4
+
+
+@pytest.mark.parametrize("opts", [
+    {},                                              # HiGHS defaults
+    {"simplex_strategy": 4, "presolve": "off"},      # the unadopted variant
+    {"simplex_strategy": 1},                         # dual plain, explicit
+])
+def test_answers_invariant_to_solver_options(opts, monkeypatch):
+    # the solver configuration is a speed lever only: it must never change
+    # which rays are returned
+    monkeypatch.setattr(core, "_HIGHS_OPTIONS", opts)
+    for seed, n, d in ((1, 60, 5), (2, 80, 4)):
+        R = random_pointed_rays(seed, n=n, d=d)
+        monkeypatch.setattr(core, "_HIGHS_OPTIONS", opts)
+        got = core.exhaustive(R)
+        monkeypatch.setattr(core, "_HIGHS_OPTIONS", {"simplex_strategy": 4})
+        assert got.tolist() == core.exhaustive(R).tolist()
+    R = np.array([(1, i, j) for i in range(5) for j in range(5)])  # tie-heavy
+    monkeypatch.setattr(core, "_HIGHS_OPTIONS", opts)
+    assert sorted(core.exhaustive(R)) == [0, 4, 20, 24]
+
+
 # --- ray shooting ------------------------------------------------------------
 
 def test_shoot_unique_and_tied():
@@ -288,3 +331,16 @@ def test_pool_sweep_verdicts():
     finally:
         core._POOL.clear()
     assert red == [2] and failed == [3]
+
+
+def test_constraint_generation_handles_wide_cones(monkeypatch):
+    # when _CG_BATCH * dim exceeds the number of rays, the subset draw and
+    # the growth step used to raise ("larger sample than population" /
+    # "kth out of bounds") instead of simply taking every row
+    monkeypatch.setattr(core, "_CG_THRESHOLD", 5)
+    R = random_pointed_rays(3, n=20, d=6)   # _CG_BATCH * 6 = 48 > 20
+    w = positive_functional(R)
+    assert (R @ w).min() >= 1 - 1e-9
+    from extremal_rays import sample
+    idx, _ = sample(R, work=200)
+    assert set(idx.tolist()) <= set(core.exhaustive(R).tolist())

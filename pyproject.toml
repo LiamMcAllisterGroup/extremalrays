@@ -1,12 +1,14 @@
 [build-system]
 requires = [
-    "setuptools>=64",
+    # PEP 639 license expressions (license = "GPL-3.0-or-later") need 77+;
+    # older setuptools fails to build this project rather than warning
+    "setuptools>=77",
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "extremal-rays"
-version = "0.3.0"
+version = "0.4.0"
 description = "Fast extremal rays of pointed polyhedral cones via Clarkson's output-sensitive algorithm"
 authors = [{ name = "Nate MacFadden for the Liam McAllister Group" }]
 readme = "README.md"
@@ -18,10 +20,14 @@ classifiers = [
     "Operating System :: MacOS",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
+# Floors are the oldest versions the suite is tested against (see the
+# dependency-floors CI job); the highspy ceiling is deliberate -- ~94% of this
+# package's runtime and all of its numerical verdicts come from HiGHS, so a
+# major bump gets tested before it is trusted.
 dependencies = [
-    "numpy",
-    "scipy",
-    "highspy",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "highspy>=1.7,<2",
 ]
 requires-python = ">=3.9"
 
@@ -40,6 +46,9 @@ Repository = "https://github.com/LiamMcAllisterGroup/extremal_rays"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+extremal_rays = ["py.typed"]
 
 [tool.ruff]
 target-version = "py39"

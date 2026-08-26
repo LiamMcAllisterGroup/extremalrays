@@ -23,6 +23,20 @@
 #               uncertified rows facet-to-facet across ridges. Work is
 #               counted in R-matvecs.
 # -----------------------------------------------------------------------------
+"""
+A cheap inner bound on the extremal-ray set.
+
+:func:`sample` certifies rays extremal without ever claiming completeness,
+by working in the dual cone {h : R h >= 0} and finding heights at which
+exactly one row is tight -- a supporting hyperplane touching a single ray.
+Walkers land on a facet by ray shooting from an interior point, then pursue
+uncertified rows facet-to-facet across ridges, with work counted in
+R-matvecs.
+
+Use it when any witness will do and cheapness matters. When the deliverable
+is THE extremal rays, use :func:`extremal_rays.exhaustive` instead: this
+saturates below the full set and has no reliable coverage estimate.
+"""
 from __future__ import annotations
 
 # external imports
@@ -70,13 +84,14 @@ def _margin_center(U) -> np.ndarray:
     if n <= _CG_THRESHOLD:
         return solve(np.arange(n))[0]
     rng = np.random.default_rng(0)
-    S = np.sort(rng.choice(n, _CG_BATCH * d, replace=False))
+    batch = min(_CG_BATCH * d, n)  # a wide cone must not oversample n
+    S = np.sort(rng.choice(n, batch, replace=False))
     for _ in range(_CG_ROUNDS):
         h, t = solve(S)
         m = (U @ h) / norms
         if m.min() > 0:
             return h
-        worst = np.argpartition(m, _CG_BATCH * d)[:_CG_BATCH * d]
+        worst = np.argpartition(m, min(batch, n - 1))[:batch]
         S = np.union1d(S, worst[m[worst] < t])
     raise RuntimeError(f"margin-center constraint generation did not "
                        f"converge in {_CG_ROUNDS} rounds")
