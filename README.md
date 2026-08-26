@@ -63,13 +63,15 @@ Candidate *order* matters for speed. The separation oracle warm-starts between c
 
 ## Algorithm Notes
 
-An LP finds $w$ with $w\cdot s\geq 1$ on every ray, which doubles as the pointedness check. Scaling onto the slice $w\cdot x=1$ turns conic redundancy into point-hull redundancy. Each candidate $p$ is then tested against the confirmed set $E$ with
+Write $R_1,\dots,R_n\in\mathbb{R}^d$ for the rows of $R$, the generators of $\mathcal{C}$. An LP finds a functional $w\in\mathbb{R}^d$ with $w\cdot R_i\geq 1$ for every $i$. Such a $w$ exists precisely when $\mathcal{C}$ is pointed, so this doubles as the pointedness check. Rescaling each generator to $p_i=R_i/(w\cdot R_i)$ moves it onto the slice $w\cdot x=1$, which turns conic redundancy into point-hull redundancy: $R_i$ is extremal in $\mathcal{C}$ exactly when $p_i$ is a vertex of $\mathrm{conv}\\{p_1,\dots,p_n\\}$.
 
-$$ \max\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \forall e\in E, \quad -1\leq c_i\leq 1, $$
+Let $E$ be the rays confirmed extremal so far, which starts empty and only grows. A candidate $p$ is tested against it by searching for a linear functional $c\in\mathbb{R}^d$ that separates $p$ from $\mathrm{cone}(E)$:
 
-which is always feasible and bounded. Value $0$ means $p\in\text{cone}(E)$ by Farkas, so $p$ is redundant, and that verdict holds no matter how incomplete $E$ still is. A positive value says nothing about $p$ itself; it says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot s$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
+$$ \max_{c\in\mathbb{R}^d}\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \ \forall e\in E, \quad -1\leq c_i\leq 1, $$
 
-Both oracles unit-normalize their inputs first. Membership in a cone is scale-free, so this changes nothing mathematically, but it means a fixed tolerance means the same thing for every candidate. Skip it and the slice coordinates under an anisotropic $w$ span orders of magnitude, at which point rays start falling under `tol` for no geometric reason.
+always feasible ($c=0$) and bounded (the box on $c_i$). Value $0$ means $p\in\mathrm{cone}(E)$ by Farkas, so $p$ is redundant, and that verdict holds no matter how incomplete $E$ still is. A positive value says nothing about $p$ itself; it says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot p_i$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
+
+Both oracles unit-normalize their inputs first. Membership in a cone is scale-free, so this changes nothing mathematically, but it means a fixed tolerance means the same thing for every candidate. Skip it and the slice coordinates $p_i$ under an anisotropic $w$ span orders of magnitude, at which point rays start falling under `tol` for no geometric reason.
 
 The failure mode to watch is a ray going *missing*, since that is the one that breaks generation. A candidate is called redundant when its separation value lands below `tol`, and on badly conditioned cones a genuinely extremal ray can score just under. Three things guard it now. Verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral; float input cannot do that, so it warns instead; and `verify` rechecks the whole answer, escalating borderline rays in both directions. What is left is a real limit rather than an oversight, since no floating-point LP can tell "inside the cone" from "$10^{-15}$ outside it". Pass integer rays when you have them.
 

@@ -38,7 +38,7 @@ plt.rcParams.update({
 
 HERE = pathlib.Path(__file__).parent
 STYLE = {
-    "extremal-rays": ("o", "steelblue"),
+    "extremalrays": ("o", "steelblue"),
     "CYTools (per-ray LP)": ("D", "mediumpurple"),
     "lrs": ("s", "tomato"),
     "cddlib": ("^", "goldenrod"),

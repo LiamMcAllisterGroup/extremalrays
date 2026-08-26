@@ -16,7 +16,7 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Benchmark harness for extremal-rays. Repeats every measurement,
+# Description:  Benchmark harness for extremalrays. Repeats every measurement,
 #               discards a warmup, reports median and spread rather than one
 #               number, records the machine and dependency versions that
 #               produced it, and can emit JSON so results are comparable across
@@ -238,7 +238,7 @@ def main():
               f"{pw.get('low_power_mode')}; wall times are throttled and are "
               "NOT comparable to numbers measured on AC power")
     print("versions: python {python}, numpy {numpy}, scipy {scipy}, "
-          "highspy {highspy}, extremal-rays {extremal_rays} "
+          "highspy {highspy}, extremalrays {extremal_rays} "
           "({commit})".format(**env))
     print(f"protocol: {args.warmup} warmup + {args.repeat} timed runs per cone\n")
 

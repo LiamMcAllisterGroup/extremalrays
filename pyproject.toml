@@ -7,7 +7,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "extremal-rays"
+name = "extremalrays"
 version = "0.4.0"
 description = "Fast extremal rays of pointed polyhedral cones via Clarkson's output-sensitive algorithm"
 authors = [{ name = "Nate MacFadden for the Liam McAllister Group" }]
@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 # Floors are the oldest versions the suite is tested against (see the
-# dependency-floors CI job); the highspy ceiling is deliberate -- ~94% of this
+# dependency-floors CI job); the highspy ceiling is deliberate: ~94% of this
 # package's runtime and all of its numerical verdicts come from HiGHS, so a
 # major bump gets tested before it is trusted.
 dependencies = [

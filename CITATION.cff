@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: extremal-rays
+title: extremalrays
 abstract: "A Python package computing the extremal rays of pointed polyhedral cones with Clarkson's output-sensitive algorithm, replacing per-ray infeasibility proofs with small always-feasible separation LPs and constructive ray shooting."
 authors:
   - family-names: MacFadden

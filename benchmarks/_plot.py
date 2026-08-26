@@ -55,7 +55,7 @@ FIT_FROM = 10
 
 # one style per method; ours first and heaviest
 STYLE = {
-    "extremal-rays": ("o", "steelblue", 1.0),
+    "extremalrays": ("o", "steelblue", 1.0),
     "CYTools (per-ray LP)": ("D", "mediumpurple", 0.85),
     "lrs": ("s", "tomato", 0.85),
     "cddlib": ("^", "goldenrod", 0.85),

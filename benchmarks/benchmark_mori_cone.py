@@ -215,7 +215,7 @@ RETIRE_SECONDS = 600.0
 
 def available():
     """The methods this machine can actually run."""
-    methods = {"extremal-rays": (run_ours, False)}
+    methods = {"extremalrays": (run_ours, False)}
     if HAS_CYTOOLS:
         methods["CYTools (per-ray LP)"] = (run_cytools, False)
     else:
