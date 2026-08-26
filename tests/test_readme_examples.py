@@ -37,7 +37,7 @@ def test_readme_usage_snippet():
     """The README's example must run exactly as printed.
 
     It previously loaded a `rays.npy` the repo does not ship, and this test
-    manufactured that file before exec'ing the block -- so the test passed
+    manufactured that file before exec'ing the block, so the test passed
     while the documented snippet failed for every reader. The snippet is now
     self-contained, and nothing is set up for it here on purpose.
     """

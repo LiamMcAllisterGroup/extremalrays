@@ -17,7 +17,7 @@
 #
 # -----------------------------------------------------------------------------
 # Description:  Build the Mori-cone CAP for a range of h11 and save the rays.
-#               The cap is far larger than the cone it caps -- 20,899 rays at
+#               The cap is far larger than the cone it caps: 20,899 rays at
 #               h11=50 against 333 for the cone, and 10,026,843 at h11=491 --
 #               which is what makes it the interesting benchmark family.
 #

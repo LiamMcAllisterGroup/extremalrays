@@ -202,7 +202,7 @@ def draw(args, rec=None):
         if keep.sum() >= 3:
             # weight by each point's own spread, then rescale the covariance
             # by the reduced chi-square so the quoted error reflects the
-            # scatter about the line -- between-instance variation, which
+            # scatter about the line, between-instance variation, which
             # dwarfs the repeat-timing noise
             span = 0.5 * (np.log10(np.maximum(hi[keep], 1e-12))
                           - np.log10(np.maximum(lo[keep], 1e-12)))

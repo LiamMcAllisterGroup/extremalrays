@@ -108,8 +108,8 @@ def test_verify_time_limit_option():
 
 # a cone whose coefficients span 1e6: ray 9 is genuinely extremal but sits so
 # close to cone(the others) that its separation margin is 3.75e-08, below the
-# default sep_tol. verify must still accept it -- a nearly-redundant ray is a
-# ray -- and must still reject the answer that omits it.
+# default sep_tol. verify must still accept it (a nearly-redundant ray is a
+# ray) and must still reject the answer that omits it.
 ILL_CONDITIONED = np.array([
     [2, -1000, 200000], [2, 30000, -200], [2, 2000, 2000], [2, -10000, -4],
     [3, 10000, -50], [2, 4000, 400], [2, 400000, -50000], [2, 50, 5000],
@@ -132,7 +132,7 @@ def test_verify_rejects_answer_missing_a_narrow_margin_ray():
 def test_verify_sep_tol_escalation_is_reachable():
     # with escalation disabled (sep_tol=0) the narrow ray passes on margin
     # alone; with the default it passes via the membership check. Either way
-    # the verdict is the same -- the parameter only chooses the evidence.
+    # the verdict is the same; the parameter only chooses the evidence.
     assert verify(ILL_CONDITIONED, ILL_TRUTH, sep_tol=0.0)[0]
     assert verify(ILL_CONDITIONED, ILL_TRUTH)[0]
 
@@ -149,7 +149,7 @@ def test_verify_accepts_supplied_w():
 #
 # Once the claimed result is fixed, every candidate is an independent
 # question, so the audit parallelises cleanly. The verdicts must be
-# byte-identical to the serial ones -- a faster audit that disagrees with the
+# byte-identical to the serial ones; a faster audit that disagrees with the
 # slow one is worthless.
 
 @pytest.mark.parametrize("trial", range(2))

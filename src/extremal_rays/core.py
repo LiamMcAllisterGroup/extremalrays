@@ -39,7 +39,7 @@ The two workhorses are :class:`_SeparationOracle` (is this ray outside the
 cone of the confirmed set?) and :class:`_MembershipOracle` (is this ray a
 non-negative combination of those rays?). Both are persistent HiGHS models
 and both carry docstrings explaining the numerical failure modes that shaped
-them -- start there when changing anything about tolerances.
+them; start there when changing anything about tolerances.
 
 A wall-time and LP-count breakdown of the most recent :func:`exhaustive`
 call is left in :data:`LAST_PROFILE`; ``closest_member`` and
@@ -78,7 +78,7 @@ _CLEANUP_LP_TIME_LIMIT = 60.0  # seconds per membership-certificate LP
 
 # HiGHS options for the separation oracle. Only the objective changes between
 # candidate tests, which leaves the incumbent basis PRIMAL feasible and dual
-# infeasible -- so primal simplex (strategy 4) resumes from it directly, while
+# infeasible, so primal simplex (strategy 4) resumes from it directly, while
 # the default (1, dual plain) must re-establish dual feasibility every solve.
 # Measured on the h11=491 Mori cone: 12.6 s vs 22.2 s for 3123 LPs, with a
 # byte-identical index set, and identical answers across 49 cones (fixtures,
@@ -97,7 +97,7 @@ _MEMBERSHIP_RESID_TOL = 1e-9
 # The ambiguous band. A separation value of exactly zero means "in the cone";
 # genuinely redundant rays land at the solver's noise floor, ~1e-13 relative
 # to a unit-normalized ray. Anything meaningfully above that but still under
-# tol is a ray the tolerance -- not the geometry -- is about to discard, and
+# tol is a ray the tolerance, not the geometry, is about to discard, and
 # the failure is silent and one-directional: the dropped ray is extremal and
 # the result no longer generates the cone.
 #
@@ -133,9 +133,9 @@ def _as_integer(R: np.ndarray) -> "np.ndarray | None":
     and [[1e-10, 2e-10]] snapped to the zero ray (annihilating a cone),
     so a legitimate float cone scaled by 1e-10 raised "no nonzero ray"
     while the same cone at scale 1 worked. With atol=0 a nonzero entry
-    can never round to zero, and genuinely near-integral floats -- the
+    can never round to zero, and genuinely near-integral floats (the
     reason to snap at all, e.g. 3 arriving as 2.9999999999999996 from a
-    matrix product -- still qualify.
+    matrix product) still qualify.
     """
     if np.issubdtype(R.dtype, np.integer):
         return R.astype(np.int64)
@@ -448,8 +448,8 @@ class _SeparationOracle:
 
     The membership question is conic, hence homogeneous in every row and
     in p, so all vectors are unit-normalized on entry. This makes the
-    separation value scale-free -- a fixed tolerance then means the same
-    thing for every candidate -- and keeps the LP conditioned. Slice
+    separation value scale-free (a fixed tolerance then means the same
+    thing for every candidate) and keeps the LP conditioned. Slice
     coordinates (whose magnitudes can vary by orders of magnitude across
     rays under an anisotropic w) would otherwise squash the separation
     value of small points below the solver's noise floor: on the h11=491
@@ -532,11 +532,11 @@ class _MembershipOracle:
     Persistent LP  E^T lam = p,  lam >= 0: is p a non-negative combination
     of the rows of E?
 
-    Columns are the coefficients lam (zero cost -- this is pure
+    Columns are the coefficients lam (zero cost; this is pure
     feasibility); one equality row per coordinate carries E^T lam = p, and
     only the row bounds change between queries. Changing the right-hand
     side preserves DUAL feasibility of the incumbent basis, so HiGHS's
-    default dual simplex resumes from it -- the mirror image of
+    default dual simplex resumes from it, the mirror image of
     _SeparationOracle, where only the objective moves and primal simplex
     is the right choice.
 
@@ -552,7 +552,7 @@ class _MembershipOracle:
     depending on what was asked before it. Every caller here either
     removes a ray or issues an audit verdict, and neither may depend on
     iteration order. Tightening the feasibility tolerances does not fix
-    it (1e-10 agrees, 1e-12 disagrees again -- coincidence, not a rule).
+    it (1e-10 agrees, 1e-12 disagrees again; coincidence, not a rule).
 
     Verdicts are returned as reconstruction residuals, never as solver
     status codes: a caller decides membership by checking E^T lam against
@@ -568,7 +568,7 @@ class _MembershipOracle:
         self._fresh()
         # the batch row-bounds call only appears in recent highspy (absent
         # in 1.11 and earlier); fall back to the per-row call, which costs
-        # d cheap C calls per query -- a few percent of one solve
+        # d cheap C calls per query, a few percent of one solve
         self._set_rhs = (self._set_rhs_batch
                          if hasattr(self.h, "changeRowsBounds")
                          else self._set_rhs_loop)
@@ -595,13 +595,13 @@ class _MembershipOracle:
         """
         Return ``(resid, lam)``: the worst-coordinate reconstruction error
         of E^T lam against p, and the coefficients. A proven-infeasible or
-        unsolved LP gives ``(inf, None)`` -- no certificate, which is the
+        unsolved LP gives ``(inf, None)``: no certificate, which is the
         sound direction for an audit.
 
         The question is asked about p/|p| (membership in a cone is
         scale-free), so the residual is comparable across candidates
         whatever their magnitude and a fixed tolerance means the same
-        thing for each -- as in _SeparationOracle. Slice coordinates span
+        thing for each, as in _SeparationOracle. Slice coordinates span
         orders of magnitude under an anisotropic w, where an absolute
         threshold is simultaneously too strict for large p and too
         permissive for small p. lam is returned for the normalized
@@ -639,7 +639,7 @@ def _shoot(P,
     was unique within tolerance: since the float error of these dot products
     is orders of magnitude below the tie tolerance, the point is then the
     true unique maximizer of a linear functional and hence provably a vertex
-    of conv(P) -- no cleanup retest needed. Only tie-broken results
+    of conv(P), so no cleanup retest is needed. Only tie-broken results
     (``tied=True``) can be corrupted by floating point and require the
     cleanup pass.
 
@@ -762,7 +762,7 @@ def _exact_membership(r: np.ndarray,
 def _fingerprint(U) -> str:
     """
     Cheap input fingerprint guarding checkpoint resumes against a changed
-    ray matrix (shape, edge blocks, and total mass -- not cryptographic).
+    ray matrix (shape, edge blocks, and total mass; not cryptographic).
     """
     if sparse.issparse(U):
         blocks = [U.data[:64], U.data[-64:], U.indices[:64]]
@@ -868,7 +868,7 @@ def _pool_sweep(args):
     # it every time. E only grows and its rows are appended in order, so a
     # snapshot is always a prefix of a later one; a worker that already has
     # MORE rows than this snapshot may keep them, because membership in
-    # cone(E) is monotone in E -- a "redundant" verdict against a superset
+    # cone(E) is monotone in E: a "redundant" verdict against a superset
     # of the live E is still a redundant verdict.
     #
     # Rebuilding cost the large jobs dearly: at 10M candidates with
@@ -879,7 +879,7 @@ def _pool_sweep(args):
         oracle = _POOL["oracle"] = _SeparationOracle(P.shape[1])
         # One solver thread per worker. HiGHS defaults to threads=0 (auto)
         # with simplex_max_concurrency=8, so N worker processes can ask for
-        # 8N threads -- 64 on an 8-worker sweep, against 10 cores here. The
+        # 8N threads, 64 on an 8-worker sweep, against 10 cores here. The
         # processes already supply the parallelism; letting each solver
         # oversubscribe on top of that is how a sweep ends up spending its
         # time in the scheduler instead of the simplex.
@@ -920,7 +920,7 @@ def exhaustive(R: ArrayLike,
 
     Implements Clarkson's output-sensitive algorithm: each candidate is
     tested only against the set E of confirmed extremal rays via a small
-    separation LP (always feasible and bounded -- extremality is never
+    separation LP (always feasible and bounded; extremality is never
     established through an infeasibility proof). A positive separation value
     yields a functional whose tie-broken maximizer over the remaining
     candidates is provably extremal and joins E; the candidate is then
@@ -966,7 +966,7 @@ def exhaustive(R: ArrayLike,
 
         Workers are spawned (not forked), so a script that passes
         ``n_workers > 0`` MUST guard its entry point with
-        ``if __name__ == "__main__":`` -- without it each worker re-imports
+        ``if __name__ == "__main__":``. Without it each worker re-imports
         and re-executes the caller module, producing recursive runs and
         leaked shared-memory segments. The rays are exported to shared
         memory for the duration of the call and unlinked before it returns.
@@ -981,13 +981,13 @@ def exhaustive(R: ArrayLike,
         lost on a crash). Defaults to None.
     sort_candidates : bool, optional
         Process candidates in lexicographic ray order rather than input
-        order. Candidate order sets the oracle's warm-start quality:
-        locality-ordered input (e.g. generated group-by-group, the common
-        case) typically beats the lexsort by ~20%, but UNSTRUCTURED input
-        without the lexsort degrades by orders of magnitude (a shuffled
-        benchmark ran > 78 min vs 20.7 s) -- pass True unless the input
-        order is known to be structured. The returned indices are
-        unaffected. Defaults to False.
+        order. Candidate order sets the oracle's warm-start quality.
+        Locality-ordered input (e.g. generated group-by-group, the
+        common case) beats the lexsort by ~18% on the h11=491 benchmark
+        cone, 13.8 s against 16.3 s. Shuffling that input costs
+        ~1.5-1.8x (21-25 s), which the lexsort recovers (13.7 s). Pass
+        True unless the input order is known to be structured. The
+        returned indices are unaffected. Defaults to False.
     known : array-like of int | None, optional
         Indices into R of rays already certified extremal, preloaded into
         the confirmed set. Almost always None: certified rays are rarely
@@ -999,7 +999,7 @@ def exhaustive(R: ArrayLike,
         A functional with w . r > 0 for every ray, when one is known
         structurally (e.g. from a compact description of the dual cone).
         Verified exactly with one matvec and rescaled, skipping the
-        pointedness LP -- at 10M rays that LP dwarfs it. An invalid w
+        pointedness LP, which at 10M rays dwarfs it. An invalid w
         raises. Defaults to None, which solves the LP.
 
     Returns
@@ -1338,7 +1338,7 @@ def exhaustive(R: ArrayLike,
                 warnings.warn(
                     f"ray {rep[e]} is numerically borderline (separation "
                     f"margin {val:.2e}, no membership certificate); keeping "
-                    "it -- the result generates the cone but may not be "
+                    "it; the result generates the cone but may not be "
                     "minimal. Consider verify()."
                 )
 

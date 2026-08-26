@@ -28,7 +28,7 @@ A cheap inner bound on the extremal-ray set.
 
 :func:`sample` certifies rays extremal without ever claiming completeness,
 by working in the dual cone {h : R h >= 0} and finding heights at which
-exactly one row is tight -- a supporting hyperplane touching a single ray.
+exactly one row is tight, a supporting hyperplane touching a single ray.
 Walkers land on a facet by ray shooting from an interior point, then pursue
 uncertified rows facet-to-facet across ridges, with work counted in
 R-matvecs.
@@ -167,7 +167,7 @@ def sample(R: ArrayLike,
     Works in the dual cone H = {h : R h >= 0} and certifies a ray by
     exhibiting a height at which exactly its row is tight (a supporting
     hyperplane touching only that ray). Cannot prove completeness, has
-    no reliable coverage estimate, and saturates below the full set -- use
+    no reliable coverage estimate, and saturates below the full set. Use
     exhaustive() whenever the deliverable is THE extremal rays; this is
     for cheaply picking off certified rays when any witness will do.
 

@@ -15,9 +15,9 @@
 # -----------------------------------------------------------------------------
 # Description:  Extremal rays of toric Mori cones, this package against the
 #               prior art, over a family of Calabi-Yau hypersurfaces at
-#               increasing h11. Every method solves the SAME problem -- given
+#               increasing h11. Every method solves the SAME problem (given
 #               generators of a pointed cone, return the minimal generating
-#               subset -- and every method's answer is checked against ours,
+#               subset), and every method's answer is checked against ours,
 #               so a fast wrong answer cannot masquerade as a win.
 #
 #               Methods: this package; CYTools' per-ray LP (the incumbent);
@@ -184,7 +184,7 @@ def measure_startup(exe: str, trials: int = 15) -> float:
     Handing an external tool a nonexistent file makes it do everything
     except the work. Subtracting this is being deliberately generous to the
     competition: process creation is an artifact of driving a CLI from a
-    benchmark, not a property of the algorithm. It matters -- measured 10.8
+    benchmark, not a property of the algorithm. It matters: measured 10.8
     ms for lrs, 9.1 for cddexec and 27.4 for normaliz (OpenMP linking),
     against a 5.4 ms floor for /usr/bin/true, which is enough to BE the
     entire measurement on small cones.

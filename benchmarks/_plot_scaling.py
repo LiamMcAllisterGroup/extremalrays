@@ -5,8 +5,8 @@
 #
 # -----------------------------------------------------------------------------
 # Description:  Mcap scaling against the size of the problem rather than
-#               against h11. Cap ray counts are not monotonic in h11 -- the
-#               h11=90 cap has 126,363 rays against 115,678 at h11=100 -- so
+#               against h11. Cap ray counts are not monotonic in h11 (the
+#               h11=90 cap has 126,363 rays against 115,678 at h11=100), so
 #               an h11 axis mixes two effects. Time versus ray count gives the
 #               exponent that actually characterises a method.
 #
@@ -98,7 +98,7 @@ def main():
             # Uncertainty on each point, in the log space the fit lives in:
             # half the observed min-max spread of its repeated timings. Points
             # measured only once carry no spread of their own, so they are
-            # given the median relative spread of the points that do -- an
+            # given the median relative spread of the points that do, an
             # assumption, and the reason the quoted errors are indicative
             # rather than rigorous.
             span = 0.5 * (np.log10(np.maximum(hi, 1e-12))

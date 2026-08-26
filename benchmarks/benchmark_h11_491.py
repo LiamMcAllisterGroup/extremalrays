@@ -164,9 +164,9 @@ def baseline(R: np.ndarray, extremal: np.ndarray, time_limit: float,
     tests/conftest.py, run under a time limit so a non-terminating case is
     recorded as unresolved rather than hanging the harness.
 
-    The cost is strongly BIMODAL -- a redundant ray is proved redundant by
+    The cost is strongly BIMODAL: a redundant ray is proved redundant by
     any feasible point, while an extremal ray needs an infeasibility proof
-    for a large degenerate system -- so the two classes are sampled and
+    for a large degenerate system, so the two classes are sampled and
     reported separately. Sampling uniformly instead would mostly draw
     redundant rays and make the baseline look uniformly fast, which is
     exactly the misreading this mode exists to prevent.
@@ -235,7 +235,7 @@ def main():
     pw = env["power"]
     if pw.get("low_power_mode") or pw.get("source") == "battery":
         print(f"  WARNING: power source {pw.get('source')}, low-power mode "
-              f"{pw.get('low_power_mode')} -- wall times are throttled and are "
+              f"{pw.get('low_power_mode')}; wall times are throttled and are "
               "NOT comparable to numbers measured on AC power")
     print("versions: python {python}, numpy {numpy}, scipy {scipy}, "
           "highspy {highspy}, extremal-rays {extremal_rays} "

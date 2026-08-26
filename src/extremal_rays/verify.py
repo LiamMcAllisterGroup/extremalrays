@@ -28,7 +28,7 @@ An independent certificate-based audit of an extremal-ray computation.
 :func:`verify` re-derives every claim from explicit, inspectable witnesses
 rather than solver status codes: a non-negative combination for every
 discarded ray, and a separating functional for every kept one. Certificates
-are checked, not trusted -- reconstruction residuals are recomputed, and for
+are checked, not trusted: reconstruction residuals are recomputed, and for
 integer rays a borderline float certificate is settled in exact rational
 arithmetic.
 
@@ -193,20 +193,20 @@ def verify(R: ArrayLike,
     sep_tol : float, optional
         Separation margin below which a claimed extremal ray is not
         accepted on its margin alone. Such a ray is re-decided by the
-        opposite question -- is it in the cone of the other result rays?
-        -- because a nearly-redundant ray is still a ray: an infeasible
+        opposite question, is it in the cone of the other result rays,
+        because a nearly-redundant ray is still a ray: an infeasible
         membership LP proves extremality however narrow the margin.
         Defaults to 1e-7.
     w : array-like | None, optional
         A functional positive on every ray, used for the slice exactly as
         in ``exhaustive``. Supply the same ``w`` when re-solving the
-        pointedness LP is impractical -- on the 10M-ray Mori-cone cap that
+        pointedness LP is impractical; on the 10M-ray Mori-cone cap that
         LP is what makes the audit hard to start at all. Defaults to None,
         which solves the LP.
     n_workers : int, optional
         Worker processes for the per-candidate pass. Once the claimed
         result is fixed, every candidate is an independent question, so
-        this parallelises cleanly -- unlike ``exhaustive``, where the
+        this parallelises cleanly, unlike ``exhaustive``, where the
         confirmed set grows as the sweep runs. Requires dense input and,
         like ``exhaustive``, an ``if __name__ == "__main__":`` guard in the
         caller. 0 runs serially. Defaults to 0.
@@ -323,7 +323,7 @@ def verify(R: ArrayLike,
             continue
         # Too narrow to call on the margin alone, so ask the opposite
         # question. If the ray is not in the cone of the others it is
-        # extremal however small its margin -- rejecting it on the margin
+        # extremal however small its margin; rejecting it on the margin
         # was itself a bug, which failed correct answers as "redundant".
         others = np.delete(E, k, axis=0)
         resid, lam = _MembershipOracle(others,
@@ -336,16 +336,16 @@ def verify(R: ArrayLike,
                                      _rows(R_int, other_rows), lam):
                 if verbosity >= 1:
                     print(f"ray {rep[e]}: margin {val:.2e} below sep_tol, "
-                          "but exactly outside the cone -- extremal")
+                          "but exactly outside the cone: extremal")
                 continue
         if resid < tol:
             failures.append(
                 f"ray {rep[e]}: lies in the cone of the other result rays "
-                f"(residual {resid:.2e}) -- redundant"
+                f"(residual {resid:.2e}): redundant"
             )
         elif verbosity >= 1:
             print(f"ray {rep[e]}: margin {val:.2e} below sep_tol but "
-                  "provably outside the cone of the others -- extremal")
+                  "provably outside the cone of the others: extremal")
 
     report = {
         "worst_membership_residual": worst_resid,

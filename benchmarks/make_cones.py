@@ -68,7 +68,7 @@ def mori_rays(vertices):
     Toric Mori cone rays (in a basis) of the CY from this polytope.
 
     The CY lives in a triangulation of the DUAL polytope, and only favorable
-    ones are used -- non-favorable cases need CYTools' experimental features
+    ones are used; non-favorable cases need CYTools' experimental features
     and are a different object than the h11 column describes.
     """
     from cytools import Polytope

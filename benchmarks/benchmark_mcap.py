@@ -18,7 +18,7 @@
 # -----------------------------------------------------------------------------
 # Description:  Mori-cone CAP benchmark against the prior art, and the two
 #               figures it produces: time against h11, and time against the
-#               number of rays. The second is the more honest view -- cap size
+#               number of rays. The second is the more honest view: cap size
 #               is not monotonic in h11 (h11=90 gives 126,363 rays against
 #               115,678 at h11=100), so an h11 axis mixes size with dimension.
 #

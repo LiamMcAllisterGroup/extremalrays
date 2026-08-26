@@ -394,7 +394,7 @@ def test_mori_h11_491_benchmark():
 
 # coefficients spanning 1e6: ray 9 is genuinely extremal but its separation
 # value is 3.75e-08, i.e. 0.375x the default tol, so it was silently dropped
-# in the main loop -- the returned set then did not generate the cone.
+# in the main loop; the returned set then did not generate the cone.
 ILL_CONDITIONED = np.array([
     [2, -1000, 200000], [2, 30000, -200], [2, 2000, 2000], [2, -10000, -4],
     [3, 10000, -50], [2, 4000, 400], [2, 400000, -50000], [2, 50, 5000],
@@ -486,7 +486,7 @@ def test_cleanup_disabled_keeps_the_impostor(monkeypatch):
 
 def test_cleanup_keeps_an_uncertifiable_suspect_and_warns(monkeypatch):
     # if no membership certificate can be obtained, removing the ray would be
-    # unsound, so cleanup must keep it and say so -- the conservative branch
+    # unsound, so cleanup must keep it and say so; the conservative branch
     _force_admitting(monkeypatch, victim=2)
 
     class NoCertificate(core._MembershipOracle):
