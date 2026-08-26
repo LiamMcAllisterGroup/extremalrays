@@ -63,7 +63,7 @@ Candidate *order* matters for speed. The separation oracle warm-starts between c
 
 ## Algorithm Notes
 
-Write $R_1,\dots,R_n\in\mathbb{R}^d$ for the rows of $R$, the generators of $\mathcal{C}$. An LP finds a functional $w\in\mathbb{R}^d$ with $w\cdot R_i\geq 1$ for every $i$. Such a $w$ exists precisely when $\mathcal{C}$ is pointed, so this doubles as the pointedness check. Rescaling each generator to $p_i=R_i/(w\cdot R_i)$ moves it onto the slice $w\cdot x=1$, which turns conic redundancy into point-hull redundancy: $R_i$ is extremal in $\mathcal{C}$ exactly when $p_i$ is a vertex of $\mathrm{conv}\\{p_1,\dots,p_n\\}$.
+Write $R_1,\dots,R_n\in\mathbb{R}^d$ for the rows of $R$, the generators of $\mathcal{C}$. First we use an LP to find a functional $w\in\mathbb{R}^d$ with $w\cdot R_i\geq 1$ for every $i$. Such a $w$ exists precisely when $\mathcal{C}$ is pointed, so this doubles as the pointedness check. Rescaling each generator to $p_i=R_i/(w\cdot R_i)$ moves it onto the slice $w\cdot x=1$, which turns conic redundancy into point-hull redundancy: $R_i$ is extremal in $\mathcal{C}$ exactly when $p_i$ is a vertex of $\mathrm{conv}\\{p_1,\dots,p_n\\}$.
 
 Let $E$ be the rays confirmed extremal so far, which starts empty and only grows. A candidate $p$ is tested against it by searching for a linear functional $c\in\mathbb{R}^d$ that separates $p$ from $\mathrm{cone}(E)$:
 
