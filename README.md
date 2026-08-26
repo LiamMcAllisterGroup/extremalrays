@@ -132,32 +132,33 @@ If you use `extremalrays` in your research, please cite it:
 ```
 extremalrays/
 ├── src/extremalrays/
-│   ├── core.py                     # exhaustive(): Clarkson sweep, separation + membership oracles, cleanup, checkpoints, workers
-│   ├── inner.py                    # sample(): cheap certified subset via dual-cone facet walks
-│   └── verify.py                   # verify(): independent certificate audit, parallelisable
+│   ├── core.py                     # exhaustive(): the Clarkson sweep
+│   ├── inner.py                    # sample(): cheap certified subset
+│   └── verify.py                   # verify(): independent certificate audit
 ├── tests/
-│   ├── conftest.py                 # shared helpers: random pointed cones, vendored CYTools per-ray LP reference
-│   ├── test_exhaustive.py          # known cones, degenerate input, invariances, brute-force cross-checks
-│   ├── test_parallel_checkpoint.py # n_workers sweeps, checkpoint save/resume/fingerprint
-│   ├── test_sample.py              # certified-subset property, determinism, options
-│   ├── test_verify.py              # accepts right answers, rejects wrong ones, parallel audit
-│   ├── test_internals.py           # unit tests of the oracles, dedup, exact arithmetic
+│   ├── conftest.py                 # shared test helpers (pytest)
+│   ├── test_exhaustive.py          # tests of exhaustive
+│   ├── test_parallel_checkpoint.py # tests of n_workers and checkpointing
+│   ├── test_sample.py              # tests of sample
+│   ├── test_verify.py              # tests of verify
+│   ├── test_internals.py           # unit tests of the oracles and dedup
 │   ├── test_readme_examples.py     # the README snippet runs as documented
-│   └── data/                       # Mcaps with CYTools-produced extremal sets (regression fixtures)
+│   └── data/                       # regression fixtures (Mcaps)
 ├── benchmarks/                     # perf benchmarks; double as usage examples + make the README figures
-│   ├── benchmark_h11_491.py        # the flagship cone: repeats, dispersion, machine capture, opt-in classical baseline
-│   ├── benchmark_mori_cone.py      # runtime vs h11 against CYTools, lrs, cddlib, Normaliz
-│   ├── benchmark_mcap.py           # the same against the Mcap, vs h11 and vs problem size
-│   ├── benchmark_parallel.py       # where parallelism pays: the sweep vs the audit
-│   ├── make_cones.py               # build the Mori cone family from the Kreuzer-Skarke polytopes
-│   ├── make_caps.py                # build the Mcap family (needs the mcap tooling)
-│   ├── _bench.py                   # shared timing helper: warmup, repeats, median with spread
-│   ├── _plot.py                    # the runtime-vs-h11 figure, with fitted power laws
+│   ├── benchmark_h11_491.py        # the flagship cone
+│   ├── benchmark_mori_cone.py      # runtime vs h11 against the prior art
+│   ├── benchmark_mcap.py           # the same for the Mcap
+│   ├── benchmark_parallel.py       # where parallelism pays
+│   ├── make_cones.py               # build the Mori cone family
+│   ├── make_caps.py                # build the Mcap family
+│   ├── _bench.py                   # shared timing helper
+│   ├── _plot.py                    # the runtime-vs-h11 figure
 │   ├── _plot_scaling.py            # the runtime-vs-ray-count figure
-│   ├── _cytools_driver.py          # runs CYTools in a fresh interpreter so it can be time-limited
-│   └── data/                       # cone and cap ray matrices (polytope tables are fetched on demand)
+│   ├── _cytools_env.py             # pinned cytools==1.4.12 for the comparison
+│   ├── _cytools_driver.py          # runs CYTools in a fresh interpreter
+│   └── data/                       # cone and Mcap ray matrices
 ├── docs/                           # README figures (benchmark_*.png)
-├── perf-work/                      # recorded benchmark results; the figures are drawn from these
+├── perf-work/                      # recorded benchmark results
 └── pyproject.toml
 ```
 
