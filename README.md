@@ -11,7 +11,7 @@ $$ \mathcal{C} = \\{\textstyle\sum_i \lambda_i R_i : \lambda_i \geq 0\\}, $$
 
 `exhaustive` returns the indices of the unique minimal generating subset, i.e. the extremal rays. `sample` is a cheaper cousin that certifies a subset of them and makes no completeness claim. `verify` audits an answer from explicit certificates, checking each one rather than trusting a solver status code.
 
-The usual approach (CYTools v1.4.12's `Cone.extremal_rays`, and `redund` in cddlib or lrs) asks, for each ray, whether it is a non-negative combination of the other $n-1$. Redundant rays answer quickly. Extremal ones need an infeasibility proof for a big degenerate system, and that is where the time goes. `extremalrays` never asks that question: a candidate is only ever tested against the small set of rays already confirmed extremal.
+The usual approach (CYTools' per-ray LP backend, its default through v1.4.12, and `redund` in cddlib or lrs) asks, for each ray, whether it is a non-negative combination of the other $n-1$. Redundant rays answer quickly. Extremal ones need an infeasibility proof for a big degenerate system, and that is where the time goes. `extremalrays` never asks that question: a candidate is only ever tested against the small set of rays already confirmed extremal.
 
 One caveat on `verify`. Its certificates are built independently of `exhaustive` (different formulation, opposite LP direction, exact arithmetic when the rays are integral), but the two share this package's preprocessing. A bug in the deduplication would be invisible to it.
 
@@ -113,7 +113,7 @@ On the $h^{1,1}=491$ Mori cone itself (3509 rays in 491 dimensions, 884 extremal
 | method | time |
 | --- | --- |
 | this package | **~13 s** |
-| CYTools `extremal_rays` | does not finish |
+| CYTools v1.4.12 `extremal_rays` | does not finish |
 | full certificate audit (optional) | ~11 s on 8 workers |
 
 The largest run so far is the cap of that same CY: 10,026,843 rays in 491 dimensions, 1,218 extremal, in 79.6 min with `n_workers=8` and the slice functional handed in via `w=`.
