@@ -17,12 +17,14 @@
 #
 # -----------------------------------------------------------------------------
 # Description:  Build the Mcap for a range of h11 and save the rays.
-#               The cap is far larger than the cone it caps: 20,899 rays at
-#               h11=50 against 333 for the cone, and 10,026,843 at h11=491 --
-#               which is what makes it the interesting benchmark family.
+#               Being an intersection, the Mcap is a SMALLER cone than any of
+#               the ones it intersects, but a far bigger problem: 20,899
+#               generators at h11=50 against 333 for one Mori cone, and
+#               10,026,843 at h11=491. That is what makes it the interesting
+#               benchmark family.
 #
-#               Circuit enumeration lives outside this package, in the
-#               mori-cap tooling; point --mcap-path at that checkout. The
+#               Circuit enumeration lives outside this package, in the mcap
+#               tooling; point --mcap-path at that checkout. The
 #               generated rays are cached, so the benchmarks and figures can
 #               be reproduced without it.
 #
