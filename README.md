@@ -81,14 +81,6 @@ This computation is generally floating point, so noise and tolerances need to be
 
 By using rational arithmetic, floating point errors are avoided and definitive results can be achieved for integral rays.
 
-### Need for Rescaling
-
-**Lemma.** If $c\cdot r_j$ attains its maximum over $j$ at a unique $j^\*$, then $r_{j^\*}$ is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$, hence it corresponds to an extremal ray of the cone.
-
-*Proof.* If $r_{j^\*}=\sum_k \lambda_k r_k$ with $\lambda_k\geq 0$ and $\sum_k \lambda_k=1$, then $c\cdot r_{j^\*}=\sum_k \lambda_k (c\cdot r_k)\leq\max_k c\cdot r_k=c\cdot r_{j^\*}$. Equality forces $c\cdot r_k=c\cdot r_{j^\*}$ whenever $\lambda_k\gt 0$, and uniqueness then forces $k=j^\*$, so $r_{j^\*}$ is not a convex combination of the others. $\square$
-
-The hypothesis fails before rescaling, where $c\cdot r_j$ ranks lengths rather than directions. Take $r_1=(1,0)$, $r_2=(0,1)$ and $r_3=(t,t)$, so that $r_3 = t r_1 + t r_2$ is redundant, and shoot with $c=(1,\alpha)$ for $\alpha\in(0,1)$: the values are $1$, $\alpha$ and $t(1+\alpha)$, so the redundant $r_3$ is the unique maximizer whenever $t\gt 1/(1+\alpha)$. Rescaling sends $r_3$ to $(\tfrac12,\tfrac12)=\tfrac12 r_1+\tfrac12 r_2$ for every $t$, which by the equality case above can never be a unique maximizer.
-
 ## Benchmarks
 
 Compared against CYTools, lrs, cddlib and Normaliz on cone families built from the Kreuzer-Skarke polytopes, on an Apple M1 Pro (32 GB RAM, macOS 26). Each method gets all 10 cores, though several stay serial by design. Every method's answer is checked against this package's before it is timed, so a fast wrong answer cannot win, and the fork cost of the command-line tools is measured and subtracted. Points are medians over three polytopes per $h^{1,1}$; error bars are the spread between them. Recreate with the [`benchmarks/`](benchmarks) scripts.
