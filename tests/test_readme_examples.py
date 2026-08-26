@@ -63,11 +63,15 @@ def test_readme_documents_the_extras_it_tells_you_to_use():
 def test_public_api_and_version():
     assert set(extremalrays.__all__) == {"exhaustive", "positive_functional",
                                           "sample", "verify"}
-    # the literal lives in pyproject.toml only (see the sync test below)
+    # the literal lives in __init__.py only; pyproject derives it
     assert re.fullmatch(r"\d+\.\d+\.\d+", extremalrays.__version__)
     assert callable(exhaustive) and callable(sample) and callable(verify)
 
 
-def test_readme_version_matches_pyproject():
+def test_version_is_single_sourced():
+    """pyproject must derive the version, not repeat it."""
     pyproject = (README.parent / "pyproject.toml").read_text()
-    assert f'version = "{extremalrays.__version__}"' in pyproject
+    assert 'dynamic = ["version"]' in pyproject
+    assert 'attr = "extremalrays.__version__"' in pyproject
+    # a bare literal would silently shadow the dynamic one
+    assert not re.search(r'^version = ["\']', pyproject, re.M)

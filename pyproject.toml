@@ -8,7 +8,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "extremalrays"
-version = "0.4.0"
+# the version literal lives in src/extremalrays/__init__.py; nowhere else
+dynamic = ["version"]
 description = "Fast extremal rays of pointed polyhedral cones via Clarkson's output-sensitive algorithm"
 authors = [{ name = "Nate MacFadden for the Liam McAllister Group" }]
 readme = "README.md"
@@ -43,6 +44,9 @@ exact = [
 
 [project.urls]
 Repository = "https://github.com/LiamMcAllisterGroup/extremalrays"
+
+[tool.setuptools.dynamic]
+version = { attr = "extremalrays.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
