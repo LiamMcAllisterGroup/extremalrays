@@ -34,3 +34,6 @@ perf-work/*
 
 # repo-review output (regenerable tool output)
 repo-review-out/
+
+# pinned CYTools env for the benchmarks (built on demand)
+benchmarks/.venv-cytools-*/

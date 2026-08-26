@@ -46,23 +46,18 @@ import time
 # external imports
 import numpy as np
 
-# CYTools must be imported BEFORE anything pulls in highspy: ortools ships its
-# own libhighs and the two clash at dlopen time ("Symbol not found:
-# setLocalOptionValue"), so importing it second fails outright
-try:
-    from cytools import config as _cy_config  # noqa: F401
-    from cytools.cone import Cone as _CyCone
-    # Left at its default (all cores via joblib above 32 rays). Every method
-    # here is given the whole machine, because that is what a user gets:
-    # Normaliz threads with OpenMP, CYTools with joblib, and this package is
-    # measured in whichever of serial/parallel is faster for it
-    HAS_CYTOOLS = True
-except Exception as _exc:                              # noqa: BLE001
-    _CyCone, HAS_CYTOOLS = None, False
-    _CY_ERR = f"{type(_exc).__name__}: {_exc}"
+# CYTools runs from a pinned virtualenv in a spawned interpreter, never
+# in-process. Two reasons: the comparison is against a RELEASED version, which
+# whatever is importable here need not be, and ortools ships its own libhighs
+# that clashes with highspy at dlopen time ("Symbol not found:
+# setLocalOptionValue"), a hazard that disappears once it is out-of-process.
+# Its parallelism is left at the CYTools default (all cores via joblib above
+# 32 rays), because that is what a user gets
 
 # local imports (import highspy transitively; see the note above)
+import _cytools_env
 from _bench import timed_median
+import extremalrays
 from extremalrays import exhaustive
 
 HERE = pathlib.Path(__file__).parent
@@ -110,16 +105,36 @@ def run_ours(R):
 
 def run_cytools(R, timeout=None):
     """
-    CYTools' per-ray LP, with its own default parallelism (joblib over all
-    cores above 32 rays).
+    CYTools' per-ray LP, from the pinned env, in a spawned interpreter.
 
-    Run in-process: wrapping it in a forked child to enforce a deadline
-    deadlocks, because forking a process that then starts joblib workers is
-    unsafe. Instead the caller retires it once it gets slow (see
-    RETIRE_SECONDS), which happens long before the cones where it would run
-    for hours.
+    Spawned rather than forked: forking a process that then starts joblib
+    workers deadlocks, and a separate process is the only way to put a
+    wall-clock limit on a call that has none of its own.
     """
-    return len(_CyCone(R.tolist()).extremal_rays())
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "rays.npy"
+        np.save(path, R)
+        out = _spawn([_cytools_env.interpreter(quiet=True),
+                      str(HERE / "_cytools_driver.py"), str(path)],
+                     timeout=timeout)
+    return int(out.split()[-1])
+
+
+def _spawn(argv, timeout=None):
+    """Run argv in its own process group; kill the GROUP on timeout."""
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        proc.communicate()
+        raise
+    if proc.returncode != 0:
+        raise RuntimeError(err.strip().splitlines()[-1] if err.strip() else
+                           f"exit {proc.returncode}")
+    return out.strip()
 
 
 def _external(cmd, payload, suffix, parse, timeout, outfile=None,
@@ -213,13 +228,29 @@ RESOLUTION = 1.5
 RETIRE_SECONDS = 600.0
 
 
+def measure_import(argv, trials: int = 5) -> float:
+    """Median wall time of a command that only starts up and exits."""
+    times = []
+    for _ in range(trials):
+        t0 = time.perf_counter()
+        try:
+            subprocess.run(argv, capture_output=True, timeout=120, check=True)
+        except Exception:                              # noqa: BLE001
+            return 0.0
+        times.append(time.perf_counter() - t0)
+    times.sort()
+    return times[len(times) // 2]
+
+
 def available():
     """The methods this machine can actually run."""
     methods = {"extremalrays": (run_ours, False)}
-    if HAS_CYTOOLS:
-        methods["CYTools (per-ray LP)"] = (run_cytools, False)
-    else:
-        print(f"skipping CYTools: {_CY_ERR.splitlines()[0][:110]}")
+    try:
+        _cytools_env.interpreter()
+        methods["CYTools (per-ray LP)"] = (run_cytools, True)
+    except Exception as exc:                           # noqa: BLE001
+        print(f"skipping CYTools: {type(exc).__name__}: "
+              f"{str(exc).splitlines()[0][:110]}")
     for name, fn, exe in (("lrs", run_lrs, "lrs"),
                           ("cddlib", run_cdd, "cddexec"),
                           ("Normaliz", run_normaliz, "normaliz")):
@@ -234,13 +265,17 @@ def available():
 # driver
 # -----------------------------------------------------------------------------
 
-def _write(path, truth, startup, results):
+def _write(path, truth, startup, results, versions=None):
     """Persist results so far; called after every h11."""
     out = pathlib.Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(
         {"extremal": truth,
          "startup_subtracted": startup,
+         # which implementations produced these numbers. Without it a result
+         # is unfalsifiable: CYTools' extremal_rays is version-sensitive, and
+         # v1.4.13 is expected to change it outright
+         "versions": versions or {},
          "times": {k: {str(h): v for h, v in d.items()}
                    for k, d in results.items()}}, indent=2))
 
@@ -281,6 +316,14 @@ def main():
     exes = {"lrs": "lrs", "cddlib": "cddexec", "Normaliz": "normaliz"}
     startup = {name: measure_startup(exe) for name, exe in exes.items()
                if name in methods}
+    versions = {"extremalrays": extremalrays.__version__}
+    if "CYTools (per-ray LP)" in methods:
+        py = _cytools_env.interpreter(quiet=True)
+        versions["CYTools"] = _cytools_env.installed_version(py)
+        # interpreter start-up plus the cytools import, which is seconds, not
+        # milliseconds; charging it to the algorithm would be a real distortion
+        startup["CYTools (per-ray LP)"] = measure_import(
+            [py, str(HERE / "_cytools_driver.py"), "--import-only"])
     print(f"methods: {', '.join(methods)}")
     if startup:
         print("process startup subtracted from external tools: "
@@ -343,9 +386,9 @@ def main():
                 dead.add(name)
         print("  ".join(row), flush=True)
         # write after every h11 so a long run can be plotted while it runs
-        _write(args.json, truth, startup, results)
+        _write(args.json, truth, startup, results, versions)
 
-    _write(args.json, truth, startup, results)
+    _write(args.json, truth, startup, results, versions)
     print(f"\nwrote {args.json}")
     return results, truth
 
