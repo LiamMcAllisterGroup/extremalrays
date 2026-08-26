@@ -29,9 +29,14 @@ Removing redundant generators is a classical problem with good tools: the double
 ## Installation
 
 ```
-pip install -e .                 # runtime only
-pip install -e ".[test]"         # + pytest
-pip install -e ".[exact]"        # + python-flint, faster exact arithmetic
+pip install extremalrays                 # runtime only
+pip install "extremalrays[exact]"        # + python-flint, faster exact arithmetic
+```
+
+From a checkout, swap `extremalrays` for `-e .`:
+
+```
+pip install -e ".[test]"                 # + pytest, to run the suite
 ```
 
 Dependencies: numpy, scipy, highspy, with version floors that CI installs and tests. `python-flint` is optional; without it a pure-Python fallback is used.
