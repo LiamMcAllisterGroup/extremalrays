@@ -63,21 +63,15 @@ Candidate *order* matters for speed. The separation oracle warm-starts between c
 
 ## Algorithm Notes
 
-The first step is to check that $\mathcal{C}$ is pointed and to rescale the rays. Pointedness is desired because a cone containing a linear subspace (i.e., a 'lineality space') has less-clear extremal rays. Rescaling is desired because it changes no verdict, it converts conic question into a polytope one, and it lets a single `tol` mean the same thing for every ray.
+The first step is to check that $\mathcal{C}$ is pointed and to rescale the rays.
+ * Pointedness is desired because a cone containing a linear subspace (i.e., a 'lineality space') has less-clear extremal rays.
+ * Rescaling is necessary for our formulation because then (with pointedness), the problem is a polytope-vertex computation, thus enabling our chosen algorithm.
 
-Write $r_1,\dots,r_n\in\mathbb{R}^d$ for the rows of $R$. Both jobs fall out of one feasibility LP,
+Both of the above checks/modifications can be done with one feasibility LP,
 
 $$ \text{find } w\in\mathbb{R}^d \quad \text{s.t.} \quad w\cdot r_i \geq 1 \ \ \forall i, $$
 
-solvable exactly when $\mathcal{C}$ is pointed. Its solution fixes the slice $w\cdot x=1$, and $r_i\leftarrow r_i/(w\cdot r_i)$ lands every ray on it, so $r_i$ is extremal in $\mathcal{C}$ exactly when it is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$.
-
-Rescaling is what makes the ray-shooting step below valid.
-
-**Lemma.** If $c\cdot r_j$ attains its maximum over $j$ at a unique $j^\*$, then $r_{j^\*}$ is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$, hence extremal.
-
-*Proof.* If $r_{j^\*}=\sum_k \lambda_k r_k$ with $\lambda_k\geq 0$ and $\sum_k \lambda_k=1$, then $c\cdot r_{j^\*}=\sum_k \lambda_k (c\cdot r_k)\leq\max_k c\cdot r_k=c\cdot r_{j^\*}$. Equality forces $c\cdot r_k=c\cdot r_{j^\*}$ whenever $\lambda_k\gt 0$, and uniqueness then forces $k=j^\*$, so $r_{j^\*}$ is not a convex combination of the others. $\square$
-
-The hypothesis fails before rescaling, where $c\cdot r_j$ ranks lengths rather than directions. Take $r_1=(1,0)$, $r_2=(0,1)$ and $r_3=(t,t)$, so that $r_3 = t r_1 + t r_2$ is redundant, and shoot with $c=(1,\alpha)$ for $\alpha\in(0,1)$: the values are $1$, $\alpha$ and $t(1+\alpha)$, so the redundant $r_3$ is the unique maximizer whenever $t\gt 1/(1+\alpha)$. Rescaling sends $r_3$ to $(\tfrac12,\tfrac12)=\tfrac12 r_1+\tfrac12 r_2$ for every $t$, which by the equality case above can never be a unique maximizer.
+for $r_1,\dots,r_n\in\mathbb{R}^d$ the (potentially-non-extremal) rays. This LP is solvable if and only if $\mathcal{C}$ is pointed. Further, the rescaling $r_i\leftarrow r_i/(w\cdot r_i)$ forces all rays to land on the slice $w\cdot x=1$ and hence be interpretable as a polytope $\mathrm{conv}\\{r_1,\dots,r_n\\}$.
 
 Let $E$ be the rays confirmed extremal so far, which starts empty and only grows. A candidate $p$ is tested against it by searching for a linear functional $c\in\mathbb{R}^d$ that separates $p$ from $\mathrm{cone}(E)$:
 
@@ -89,6 +83,14 @@ The failure mode to watch is a ray going *missing*, since that is the one that b
   1) verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral, and
   2) `verify` rechecks the whole answer, escalating borderline rays in both directions.
 Since check 1 is reliable, one should input integral rays if possible.
+
+### Need for Rescaling
+
+**Lemma.** If $c\cdot r_j$ attains its maximum over $j$ at a unique $j^\*$, then $r_{j^\*}$ is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$, hence extremal.
+
+*Proof.* If $r_{j^\*}=\sum_k \lambda_k r_k$ with $\lambda_k\geq 0$ and $\sum_k \lambda_k=1$, then $c\cdot r_{j^\*}=\sum_k \lambda_k (c\cdot r_k)\leq\max_k c\cdot r_k=c\cdot r_{j^\*}$. Equality forces $c\cdot r_k=c\cdot r_{j^\*}$ whenever $\lambda_k\gt 0$, and uniqueness then forces $k=j^\*$, so $r_{j^\*}$ is not a convex combination of the others. $\square$
+
+The hypothesis fails before rescaling, where $c\cdot r_j$ ranks lengths rather than directions. Take $r_1=(1,0)$, $r_2=(0,1)$ and $r_3=(t,t)$, so that $r_3 = t r_1 + t r_2$ is redundant, and shoot with $c=(1,\alpha)$ for $\alpha\in(0,1)$: the values are $1$, $\alpha$ and $t(1+\alpha)$, so the redundant $r_3$ is the unique maximizer whenever $t\gt 1/(1+\alpha)$. Rescaling sends $r_3$ to $(\tfrac12,\tfrac12)=\tfrac12 r_1+\tfrac12 r_2$ for every $t$, which by the equality case above can never be a unique maximizer.
 
 ## Benchmarks
 
