@@ -79,14 +79,15 @@ $$ \max_{c\in\mathbb{R}^d}\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \ 
 
 always feasible ($c=0$) and bounded (the box on $c_i$). Value $0$ means $p\in\mathrm{cone}(E)$ by Farkas, so $p$ is redundant regardless of how incomplete $E$ still is. A positive value says nothing about $p$ itself; it just says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot r_i$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
 
-The failure mode to watch is a ray going *missing*, since that is the one that breaks generation. A candidate is called redundant when its separation value lands below `tol`, and on badly conditioned cones a genuinely extremal ray can score just under. To guard against this,
+This computation is generally floating point, so noise and tolerances need to be considered. Explicitly, a ray $r_i$ is said to be redundant when $c\cdot r_i<tol$. On badly conditioned cones, this can fire even for $r_i$ extremal. To guard against this,
   1) verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral, and
   2) `verify` rechecks the whole answer, escalating borderline rays in both directions.
-Since check 1 is reliable, one should input integral rays if possible.
+
+By using rational arithmetic, floating point errors are avoided and definitive results can be achieved for integral rays.
 
 ### Need for Rescaling
 
-**Lemma.** If $c\cdot r_j$ attains its maximum over $j$ at a unique $j^\*$, then $r_{j^\*}$ is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$, hence extremal.
+**Lemma.** If $c\cdot r_j$ attains its maximum over $j$ at a unique $j^\*$, then $r_{j^\*}$ is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$, hence it corresponds to an extremal ray of the cone.
 
 *Proof.* If $r_{j^\*}=\sum_k \lambda_k r_k$ with $\lambda_k\geq 0$ and $\sum_k \lambda_k=1$, then $c\cdot r_{j^\*}=\sum_k \lambda_k (c\cdot r_k)\leq\max_k c\cdot r_k=c\cdot r_{j^\*}$. Equality forces $c\cdot r_k=c\cdot r_{j^\*}$ whenever $\lambda_k\gt 0$, and uniqueness then forces $k=j^\*$, so $r_{j^\*}$ is not a convex combination of the others. $\square$
 
