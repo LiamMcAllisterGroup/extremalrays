@@ -75,11 +75,12 @@ Let $E$ be the rays confirmed extremal so far, which starts empty and only grows
 
 $$ \max_{c\in\mathbb{R}^d}\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \ \forall e\in E, \quad -1\leq c_i\leq 1, $$
 
-always feasible ($c=0$) and bounded (the box on $c_i$). Value $0$ means $p\in\mathrm{cone}(E)$ by Farkas, so $p$ is redundant, and that verdict holds no matter how incomplete $E$ still is. A positive value says nothing about $p$ itself; it says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot r_i$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
+always feasible ($c=0$) and bounded (the box on $c_i$). Value $0$ means $p\in\mathrm{cone}(E)$ by Farkas, so $p$ is redundant regardless of how incomplete $E$ still is. A positive value says nothing about $p$ itself; it just says $E$ is missing an extremal ray. The optimizer $c$ then points at one: the tie-broken maximizer of $c\cdot r_i$ over the remaining candidates is provably a vertex, joins $E$, and $p$ gets retested. That bounds the LP count by $n+|E|$, all of them small, on one persistent warm-started HiGHS model.
 
-The failure mode to watch is a ray going *missing*, since that is the one that breaks generation. A candidate is called redundant when its separation value lands below `tol`, and on badly conditioned cones a genuinely extremal ray can score just under. Three things guard it now. Verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral; float input cannot do that, so it warns instead; and `verify` rechecks the whole answer, escalating borderline rays in both directions. What is left is a real limit rather than an oversight, since no floating-point LP can tell "inside the cone" from "$10^{-15}$ outside it". Pass integer rays when you have them.
-
-The `_SeparationOracle` and `_MembershipOracle` docstrings in [`core.py`](src/extremalrays/core.py) record the numerical failures that shaped both, and I encourage you to read them.
+The failure mode to watch is a ray going *missing*, since that is the one that breaks generation. A candidate is called redundant when its separation value lands below `tol`, and on badly conditioned cones a genuinely extremal ray can score just under. To guard against this,
+  1) verdicts between the solver's noise floor and `tol` get re-decided in exact rational arithmetic when the rays are integral, and
+  2) `verify` rechecks the whole answer, escalating borderline rays in both directions.
+Since check 1 is reliable, one should input integral rays if possible.
 
 ## Benchmarks
 
