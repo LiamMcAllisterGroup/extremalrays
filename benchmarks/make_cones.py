@@ -44,7 +44,7 @@ OUT = HERE / "data" / "mori_cones_by_h11.npz"
 
 # vertex-count files to search, cheapest first. 5 vertices already spans
 # h11 = 1..491, but has no favorable polytope in much of 36..124, which the
-# 6- and 7-vertex files fill in.
+# 6- and 7-vertex files fill in
 VERTEX_FILES = (5, 6, 7)
 
 

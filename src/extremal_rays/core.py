@@ -85,13 +85,13 @@ _CLEANUP_LP_TIME_LIMIT = 60.0  # seconds per membership-certificate LP
 # random, tie-heavy, float, sparse, degenerate). `presolve="off"` is
 # deliberately NOT set: it adds only ~2% on top of this (inside noise) and is
 # slower than the default on its own, which does not justify giving up a
-# numerical safety net on degenerate input.
+# numerical safety net on degenerate input
 _HIGHS_OPTIONS = {"simplex_strategy": 4}
 
 # residual below which a membership reconstruction counts as certified.
 # Applied to the unit-normalized question (see _MembershipOracle), so it is
 # scale-free; a ray is only ever REMOVED on such a certificate, making a
-# strict value the sound direction (at worst the result is non-minimal).
+# strict value the sound direction (at worst the result is non-minimal)
 _MEMBERSHIP_RESID_TOL = 1e-9
 
 # The ambiguous band. A separation value of exactly zero means "in the cone";
@@ -108,11 +108,11 @@ _MEMBERSHIP_RESID_TOL = 1e-9
 # magnitude rather than by a hair.
 #
 # Verdicts inside the band are re-decided in exact rational arithmetic when
-# the rays are integral, and always reported.
+# the rays are integral, and always reported
 _AMBIGUOUS_BAND = 1e-12
 
 # ray shooting takes a candidate submatrix instead of a full matvec once the
-# unresolved set is below n / this. See _shoot.
+# unresolved set is below n / this. See _shoot
 _SUBMATRIX_SHARE = 10
 
 
@@ -651,7 +651,7 @@ def _shoot(P,
     elif len(cand) * _SUBMATRIX_SHARE < P.shape[0]:
         # few candidates left: copying their rows beats a full matvec.
         # Measured crossover at ~10% of n for 3509x491 (below that the copy
-        # is up to 20x cheaper; above it the full matvec wins by ~2x).
+        # is up to 20x cheaper; above it the full matvec wins by ~2x)
         vals = _rows(P, cand) @ c
     else:
         vals = (P @ c)[cand]  # full matvec: no candidate-submatrix copy
@@ -707,7 +707,7 @@ def _exact_membership(r: np.ndarray,
         # in a reduced row echelon form the pivot columns strictly increase
         # down the rows, and every row after the last pivot is zero. Scanning
         # each row from column 0 costs O(d * ncol) flint element reads;
-        # resuming from the previous pivot makes the whole sweep O(ncol + d).
+        # resuming from the previous pivot makes the whole sweep O(ncol + d)
         start = 0
         for q in range(d):
             lead = next((c for c in range(start, ncol + 1) if M[q, c] != 0),
@@ -873,7 +873,7 @@ def _pool_sweep(args):
     #
     # Rebuilding cost the large jobs dearly: at 10M candidates with
     # |E| ~ 1218 and 2000-row chunks that is ~6 million wasted addRow calls,
-    # which is most of why 8 workers returned only ~1.9x there.
+    # which is most of why 8 workers returned only ~1.9x there
     oracle = _POOL.get("oracle")
     if oracle is None:
         oracle = _POOL["oracle"] = _SeparationOracle(P.shape[1])
@@ -882,7 +882,7 @@ def _pool_sweep(args):
         # 8N threads, 64 on an 8-worker sweep, against 10 cores here. The
         # processes already supply the parallelism; letting each solver
         # oversubscribe on top of that is how a sweep ends up spending its
-        # time in the scheduler instead of the simplex.
+        # time in the scheduler instead of the simplex
         oracle.h.setOptionValue("threads", 1)
         _POOL["n_rows"] = 0
     for e in E_idx[_POOL["n_rows"]:]:
@@ -1222,7 +1222,7 @@ def exhaustive(R: ArrayLike,
         # A caller that passes n_workers>0 without an
         # `if __name__ == "__main__":` guard has every spawned child
         # re-import its module and call this again; without this check that
-        # recurses until the process table gives out. Degrade instead.
+        # recurses until the process table gives out. Degrade instead
         warnings.warn(
             "n_workers > 0 was requested inside a worker process, which "
             "means the calling module is missing an "
@@ -1292,7 +1292,7 @@ def exhaustive(R: ArrayLike,
 
     # --- cleanup: restore minimality lost to floating-point tie-breaking.
     # Only rays admitted through tie-broken shots can be impostors; rays that
-    # were the unique maximizer of some functional are provably vertices.
+    # were the unique maximizer of some functional are provably vertices
     if cleanup:
         suspects = [e for e in sorted(E) if suspect.get(e, True)]
         prof["n_suspects"] = len(suspects)
@@ -1345,7 +1345,7 @@ def exhaustive(R: ArrayLike,
     # An ambiguous verdict means the tolerance, not the geometry, made the
     # call. For integer rays those were already settled in exact arithmetic
     # above, so there is nothing to warn about; for float rays no exact path
-    # exists and this warning is the only signal the caller gets.
+    # exists and this warning is the only signal the caller gets
     if closest["member"] > _AMBIGUOUS_BAND and R_int is None:
         warnings.warn(
             f"{prof['n_ambiguous']} redundancy verdict(s) landed between the "

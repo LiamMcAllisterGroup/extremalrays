@@ -79,7 +79,7 @@ def machine() -> dict:
     # Power Mode throttles the CPU enough to change wall times by ~40% (the
     # same exact-arithmetic call measured 0.187 s on AC and 0.253-0.358 s on
     # battery with LPM on). A benchmark that does not record this invites
-    # exactly the phantom-regression hunt it is meant to prevent.
+    # exactly the phantom-regression hunt it is meant to prevent
     power = {}
     if platform.system() == "Darwin":
         try:

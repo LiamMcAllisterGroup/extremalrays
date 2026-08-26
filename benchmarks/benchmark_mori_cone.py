@@ -48,14 +48,14 @@ import numpy as np
 
 # CYTools must be imported BEFORE anything pulls in highspy: ortools ships its
 # own libhighs and the two clash at dlopen time ("Symbol not found:
-# setLocalOptionValue"), so importing it second fails outright.
+# setLocalOptionValue"), so importing it second fails outright
 try:
     from cytools import config as _cy_config  # noqa: F401
     from cytools.cone import Cone as _CyCone
     # Left at its default (all cores via joblib above 32 rays). Every method
     # here is given the whole machine, because that is what a user gets:
     # Normaliz threads with OpenMP, CYTools with joblib, and this package is
-    # measured in whichever of serial/parallel is faster for it.
+    # measured in whichever of serial/parallel is faster for it
     HAS_CYTOOLS = True
 except Exception as _exc:                              # noqa: BLE001
     _CyCone, HAS_CYTOOLS = None, False
@@ -134,7 +134,7 @@ def _external(cmd, payload, suffix, parse, timeout, outfile=None,
         # spawns OpenMP children that survive it: three such orphans were
         # found still running 80+ minutes after their parent was killed,
         # driving the load average to 118 on a 10-core machine and inflating
-        # every measurement taken alongside them.
+        # every measurement taken alongside them
         proc = subprocess.Popen(
             argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE if stdin else None, text=True, cwd=tmp,
@@ -209,7 +209,7 @@ RESOLUTION = 1.5
 # A method with no time limit of its own (CYTools) is retired once a single
 # cone costs it this long. Set generously: a lower bar retires a method that
 # is merely slow rather than failing, which reads on a plot as a cliff it did
-# not actually hit.
+# not actually hit
 RETIRE_SECONDS = 600.0
 
 

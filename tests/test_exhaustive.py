@@ -394,7 +394,7 @@ def test_mori_h11_491_benchmark():
 
 # coefficients spanning 1e6: ray 9 is genuinely extremal but its separation
 # value is 3.75e-08, i.e. 0.375x the default tol, so it was silently dropped
-# in the main loop; the returned set then did not generate the cone.
+# in the main loop; the returned set then did not generate the cone
 ILL_CONDITIONED = np.array([
     [2, -1000, 200000], [2, 30000, -200], [2, 2000, 2000], [2, -10000, -4],
     [3, 10000, -50], [2, 4000, 400], [2, 400000, -50000], [2, 50, 5000],
@@ -423,7 +423,7 @@ def test_near_tol_float_input_warns():
 def test_float_answer_is_scale_invariant(scale):
     # scaling every ray leaves the cone unchanged, so the answer must not
     # move. An absolute integer-snapping tolerance used to collapse small
-    # float rays onto integers (and raise "no nonzero ray" below ~1e-9).
+    # float rays onto integers (and raise "no nonzero ray" below ~1e-9)
     rng = np.random.default_rng(0)
     R = np.column_stack([rng.uniform(1, 2, 12), rng.standard_normal((12, 3))])
     assert exhaustive(R * scale).tolist() == exhaustive(R).tolist()
@@ -444,7 +444,7 @@ def test_mixed_scale_rows_do_not_change_the_answer():
 # tie-breaking design. On well-conditioned cones it essentially never fires
 # (searching grids, cubes and 60 random cones found no case where cleanup=True
 # and cleanup=False differ), so the branch is forced here rather than waited
-# for: _shoot is patched to admit a ray that is provably redundant.
+# for: _shoot is patched to admit a ray that is provably redundant
 
 REDUNDANT_CONE = np.array([[1, 0], [0, 1], [1, 1]])  # ray 2 = ray 0 + ray 1
 

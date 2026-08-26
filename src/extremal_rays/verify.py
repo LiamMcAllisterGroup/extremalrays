@@ -298,7 +298,7 @@ def verify(R: ArrayLike,
         # A float certificate cannot tell "inside the cone" from "just
         # outside it"; when the ray is only just inside, settle it exactly.
         # The coefficients are recomputed here rather than shipped back
-        # from a worker: they are large and only these few rays need them.
+        # from a worker: they are large and only these few rays need them
         if want_margin and 1e-13 < margin < 1e-7:
             lam = membership.residual(_row(P, k))[1]
             if lam is not None and not _exact_membership(
@@ -324,7 +324,7 @@ def verify(R: ArrayLike,
         # Too narrow to call on the margin alone, so ask the opposite
         # question. If the ray is not in the cone of the others it is
         # extremal however small its margin; rejecting it on the margin
-        # was itself a bug, which failed correct answers as "redundant".
+        # was itself a bug, which failed correct answers as "redundant"
         others = np.delete(E, k, axis=0)
         resid, lam = _MembershipOracle(others,
                                        time_limit=time_limit).residual(E[k])

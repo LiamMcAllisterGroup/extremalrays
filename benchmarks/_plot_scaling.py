@@ -27,7 +27,7 @@ import numpy as np
 # TeX-quality typography without requiring a LaTeX installation: Computer
 # Modern for both maths and text, so the fitted laws in the legend render the
 # way they would in the paper. text.usetex=True would be truer still, but it
-# needs latex+dvipng on the machine, which is not assumed here.
+# needs latex+dvipng on the machine, which is not assumed here
 plt.rcParams.update({
     "mathtext.fontset": "cm",
     "font.family": "serif",
@@ -100,7 +100,7 @@ def main():
             # measured only once carry no spread of their own, so they are
             # given the median relative spread of the points that do, an
             # assumption, and the reason the quoted errors are indicative
-            # rather than rigorous.
+            # rather than rigorous
             span = 0.5 * (np.log10(np.maximum(hi, 1e-12))
                           - np.log10(np.maximum(lo, 1e-12)))
             have = span[span > 0]
@@ -115,7 +115,7 @@ def main():
             # line far more than that, because different cones of the same
             # size genuinely differ. cov=True rescales by the reduced
             # chi-square, so the quoted error reflects that scatter. The
-            # larger one is the honest number to publish.
+            # larger one is the honest number to publish
             err_meas = float(np.sqrt(cov_meas[0, 0]))
             _, cov_scat = np.polyfit(np.log10(n), np.log10(t), 1,
                                      w=1.0 / sigma, cov=True)

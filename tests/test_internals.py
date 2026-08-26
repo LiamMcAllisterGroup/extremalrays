@@ -195,7 +195,7 @@ def test_separation_oracle_rebuild_preserves_state():
 def test_oracle_sets_primal_simplex():
     # only the objective changes between solves, so the basis stays primal
     # feasible; strategy 4 (primal) resumes from it, the default 1 (dual)
-    # does not. guards the option against a silent revert to the default.
+    # does not. guards the option against a silent revert to the default
     assert core._HIGHS_OPTIONS["simplex_strategy"] == 4
     o = _SeparationOracle(3)
     assert o.h.getOptionValue("simplex_strategy")[1] == 4

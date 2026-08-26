@@ -38,7 +38,7 @@ import numpy as np
 # TeX-quality typography without requiring a LaTeX installation: Computer
 # Modern for both maths and text, so the fitted laws in the legend render the
 # way they would in the paper. text.usetex=True would be truer still, but it
-# needs latex+dvipng on the machine, which is not assumed here.
+# needs latex+dvipng on the machine, which is not assumed here
 plt.rcParams.update({
     "mathtext.fontset": "cm",
     "font.family": "serif",
@@ -162,7 +162,7 @@ def draw(args, rec=None):
     # CYTools is measured in a subprocess, so its compute time is only
     # meaningful once it clears the interpreter+import cost subtracted from
     # it. Below that the points are noise pinned to a floor, and plotting
-    # them invents a flat plateau and flattens the fit.
+    # them invents a flat plateau and flattens the fit
     floor = rec.get("cytools_floor", 2e-3)
     if "CYTools (per-ray LP)" in times:
         times["CYTools (per-ray LP)"] = {
@@ -180,7 +180,7 @@ def draw(args, rec=None):
         # after subtracting process startup the fastest trial can land at or
         # below zero, which on a log axis draws a bar down to the floor and
         # reads as enormous uncertainty. Where that happens the downward
-        # spread is simply not resolvable, so no lower bar is drawn.
+        # spread is simply not resolvable, so no lower bar is drawn
         lower = np.where(lo > 0, med - lo, 0.0)
         # On log-log axes these are close to straight, i.e. power laws
         # t ~ h^b, so fit that rather than joining consecutive points: a
@@ -188,11 +188,11 @@ def draw(args, rec=None):
         # measured, and the exponent is the quantity worth reading off.
         # Fit only h11 >= FIT_FROM: below it the fastest methods sit near
         # the timer floor (~1 ms) and flatten out, which drags the exponent
-        # well below the asymptotic slope the plot is actually about.
+        # well below the asymptotic slope the plot is actually about
         label = name.replace(" (per-ray LP)", "")
         # CYTools is given cones it can actually finish: any instance it
         # cannot complete inside the cap is dropped and replaced. That is a
-        # thumb on the scale in its favour, so the legend says so.
+        # thumb on the scale in its favour, so the legend says so
         dropped = rec.get("cytools_dropped", {}) if name.startswith("CYTools") \
             else {}
         # cones it could not finish were dropped and replaced, so its curve
