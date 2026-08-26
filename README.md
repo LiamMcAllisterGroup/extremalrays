@@ -88,13 +88,13 @@ Compared against CYTools, lrs, cddlib and Normaliz on cone families built from t
 **Torically inherited Mori cone**, $h^{1,1} = 3$ to $491$:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_prior_art.png" alt="Runtime vs h11 for torically inherited Mori cones: extremalrays alone reaches h11=491"/>
+  <img src="docs/benchmark_prior_art.png" alt="Runtime vs h11 for torically inherited Mori cones: extremalrays alone reaches h11=491"/>
 </p>
 
 **Mcap**, the intersection of the torically inherited Mori cones from all '2-face equivalent' CYs. Being an intersection it is a *smaller* cone than any of them, but a much bigger problem: 20,899 generators at $h^{1,1}=50$ against 333. Plotted against generator count, since that count is not monotonic in $h^{1,1}$:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_cap_scaling.png" alt="Runtime vs Mcap size: extremalrays and CYTools share an exponent, cddlib and lrs do not"/>
+  <img src="docs/benchmark_cap_scaling.png" alt="Runtime vs Mcap size: extremalrays and CYTools share an exponent, cddlib and lrs do not"/>
 </p>
 
 Against CYTools the exponents agree and the gap is a constant of roughly an order of magnitude. Against cddlib and lrs it is the exponent that differs ($n^{2.6}$ and $n^{3.6}$ against $n^{1.34}$), which is why they stop around 1,500 rays.
