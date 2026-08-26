@@ -42,7 +42,7 @@ exact = [
 ]
 
 [project.urls]
-Repository = "https://github.com/LiamMcAllisterGroup/extremal_rays"
+Repository = "https://github.com/LiamMcAllisterGroup/extremalrays"
 
 [tool.setuptools.packages.find]
 where = ["src"]

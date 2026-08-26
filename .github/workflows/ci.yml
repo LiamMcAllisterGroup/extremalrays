@@ -86,7 +86,7 @@ jobs:
         run: pip install -e ".[test]"
       - name: Run the harness on the bundled fixtures
         run: |
-          python benchmarks/bench_mori.py --cones caps --repeat 3 \
+          python benchmarks/benchmark_h11_491.py --cones caps --repeat 3 \
             --verify --json bench.json
       - uses: actions/upload-artifact@v4
         with:

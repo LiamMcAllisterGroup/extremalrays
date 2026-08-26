@@ -24,10 +24,10 @@
 #               compares against is runnable here too (--baseline), so the
 #               comparison is reproducible instead of asserted.
 #
-#               Run:  python benchmarks/bench_mori.py                # default
-#                     python benchmarks/bench_mori.py --repeat 5 --json out.json
-#                     python benchmarks/bench_mori.py --cones caps --verify
-#                     python benchmarks/bench_mori.py --baseline --time-limit 5
+#               Run:  python benchmarks/benchmark_h11_491.py                # default
+#                     python benchmarks/benchmark_h11_491.py --repeat 5 --json out.json
+#                     python benchmarks/benchmark_h11_491.py --cones caps --verify
+#                     python benchmarks/benchmark_h11_491.py --baseline --time-limit 5
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 

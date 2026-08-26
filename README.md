@@ -1,23 +1,35 @@
 # extremal-rays
 *[Nate MacFadden](https://github.com/natemacfadden), Liam McAllister Group, Cornell*
 
-Fast extremal rays of pointed polyhedral cones via [Clarkson's output-sensitive algorithm](https://doi.org/10.1109/SFCS.1994.365723). Built for cones that defeat the classical per-ray LP: many generators, high dimension, mostly-redundant rays -- e.g., toric Mori cones of Calabi-Yau hypersurfaces at large $h^{1,1}$. On the Mori cone of the $h^{1,1}=491$ CY (3509 generators in 491 dimensions, 884 extremal), `extremal-rays` finishes in ~20s single-threaded on an Apple M1 Pro (32 GB RAM, macOS 26) where the classical method does not terminate; reproduce this with [`benchmarks/bench_mori.py`](benchmarks/bench_mori.py) (data bundled).
+Fast extremal rays of pointed polyhedral cones via [Clarkson's output-sensitive algorithm](https://doi.org/10.1109/SFCS.1994.365723). Built for cones that defeat the classical per-ray LP: many generators, high dimension, mostly-redundant rays -- e.g., toric Mori cones of Calabi-Yau hypersurfaces at large $h^{1,1}$. On the Mori cone of the $h^{1,1}=491$ CY (3509 generators in 491 dimensions, 884 extremal), `extremal-rays` finishes in ~20s single-threaded on an Apple M1 Pro (32 GB RAM, macOS 26) where the classical method does not terminate; reproduce with [`benchmarks/benchmark_h11_491.py`](benchmarks/benchmark_h11_491.py) (data bundled).
 
 ## Description
 
 Given $R\in\mathbb{Z}^{n\times d}$ (or floats) whose rows generate a pointed cone
+$\mathcal{C} = \{\sum_i \lambda_i R_i : \lambda_i \geq 0\}$, this package provides:
 
-$$ \mathcal{C} = \\{\textstyle\sum_i \lambda_i R_i : \lambda_i \geq 0\\}, $$
+- **`exhaustive`** -- the indices of the unique minimal generating subset, i.e. the extremal rays.
+- **`sample`** -- a cheaply certified subset of them (an inner bound; no completeness claim).
+- **`verify`** -- an audit of an answer from explicit certificates, re-derived and re-checked rather than read off solver status codes.
 
-`extremal-rays` provides three methods: `exhaustive` returns the indices of the unique minimal generating subset -- the extremal rays; `sample` cheaply certifies a subset of them (an inner bound, no completeness claim); `verify` audits an answer via explicit certificates, each one re-derived and re-checked rather than taken from a solver status code.
+The standard method (CYTools' `Cone.extremal_rays`, cddlib, lrs) asks per ray: "is it a
+non-negative combination of the other $n-1$?" Redundant rays answer fast; each *extremal*
+ray needs an **infeasibility proof** for a large degenerate system. This package never asks
+that: candidates are tested only against the small confirmed-extremal set, and extremality
+is established constructively.
 
-`verify`'s independence is real but bounded, and worth stating precisely: the certificates are constructed independently of `exhaustive` -- a different formulation, the opposite LP direction, and exact rational arithmetic for integer rays whose float certificate is borderline -- but both share this package's preprocessing (primitive deduplication and the slice scaling). An error inside that shared step is invisible to the audit. What `verify` checks is the extremal-ray decision, not the deduplication.
+`verify`'s independence has a limit worth stating: its certificates are built independently
+of `exhaustive`, but both share this package's preprocessing, so an error there is invisible
+to it.
 
 ### Prior art
 
-Removing redundant generators is a classical problem with mature implementations: the double description method of Motzkin et al., realized in Fukuda's [cddlib](https://people.inf.ethz.ch/fukuda/cdd_home/) (which has shipped a Clarkson-style redundancy removal since v0.94), Avis's [lrslib](http://cgm.cs.mcgill.ca/~avis/C/lrs.html) (`redund`), [Normaliz](https://www.normaliz.uni-osnabrueck.de/), and [polymake](https://polymake.org/). Those are the right tools for most cones, and this package does not replace them. It targets one regime they handle poorly: many generators, high dimension, and a large mostly-redundant majority, where per-ray infeasibility proofs dominate. For calibration, on the bundled fixtures cddlib agrees with this package exactly, and on the $h^{1,1}=491$ Mori cone below it did not finish within 300 s.
-
-The standard method (as in [CYTools](https://cy.tools/)' `Cone.extremal_rays`) asks, for each ray, "is it a non-negative combination of all $n-1$ others?". Redundant rays answer quickly (the LP is feasible), but each *extremal* ray requires an **infeasibility proof** for a large degenerate system -- on the $h^{1,1}=491$ Mori cone, HiGHS exceeds 15 minutes on a single one. `extremal-rays` never asks that question: candidates are tested only against the small confirmed-extremal set, and extremality is only ever established constructively (see [Algorithm Notes](#algorithm-notes)).
+Redundancy removal is classical: the double description method (Motzkin et al.) in Fukuda's
+[cddlib](https://people.inf.ethz.ch/fukuda/cdd_home/), reverse search in Avis's
+[lrslib](http://cgm.cs.mcgill.ca/~avis/C/lrs.html), plus
+[Normaliz](https://www.normaliz.uni-osnabrueck.de/) and [polymake](https://polymake.org/).
+Those are the right tools for most cones. This one targets the regime they handle poorly:
+many generators, high dimension, a mostly-redundant majority. See [Benchmarks](#benchmarks).
 
 ## Limitations
 
@@ -30,11 +42,12 @@ The standard method (as in [CYTools](https://cy.tools/)' `Cone.extremal_rays`) a
 
 ```
 pip install -e .                 # runtime only
-pip install -e ".[test]"         # + pytest, to run the test suite
+pip install -e ".[test]"         # + pytest
 pip install -e ".[exact]"        # + python-flint, faster exact arithmetic
 ```
 
-Dependencies: numpy, scipy, highspy, with version floors that CI installs and tests (see the `Dependency floors` job). `python-flint` is optional: it accelerates the exact rational fallback, and without it a pure-Python implementation is used instead. Run the tests -- which include brute-force cross-checks against a vendored copy of CYTools' own method -- with `pytest`.
+Dependencies: numpy, scipy, highspy, with version floors that CI installs and tests.
+`python-flint` is optional; without it a pure-Python fallback is used.
 
 ## Usage
 
@@ -61,32 +74,51 @@ For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapsh
 
 ## Algorithm Notes
 
-An LP finds $w$ with $w\cdot s\geq 1$ on all rays (doubling as the pointedness check); scaling onto the slice $w\cdot x=1$ turns conic redundancy into point-hull redundancy. Each candidate $p$ is then tested against the confirmed-extremal set $E$ with the separation LP
+An LP finds $w$ with $w\cdot s\geq 1$ on all rays (this is also the pointedness check);
+scaling onto the slice $w\cdot x=1$ turns conic redundancy into point-hull redundancy.
+Each candidate $p$ is tested against the confirmed set $E$ with
 
 $$ \max\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \forall e\in E, \quad -1\leq c_i\leq 1, $$
 
-which is always feasible and bounded. Value $0$ means $p\in\text{cone}(E)$ (Farkas): redundant, valid however incomplete $E$ is. The oracle unit-normalizes $p$ and every $e$ (membership is conic, so this changes nothing mathematically) so that the value is scale-free and a fixed tolerance means the same thing for every candidate; on the $h^{1,1}=491$ cone, redundant rays then score $\lesssim 10^{-12}$ and the closest extremal ray $\sim 4\times10^{-5}$ (the two closest calls of a run are reported in `LAST_PROFILE`). Without normalization, slice coordinates under the LP's anisotropic $w$ squash some rays by $10^{3}$ and an extremal ray of that cone scored $8\times10^{-8}$ -- under the tolerance -- and was dropped. Normalization *mitigates* that failure rather than removing it: on cones whose integer coefficients span $10^{6}$, extremal rays have still been observed scoring below `tol` with normalization on. That is why near-tolerance verdicts are now escalated to exact arithmetic rather than trusted. A positive value proves nothing about $p$ -- it proves $E$ is missing an extremal ray, and the optimizer $c$ locates it by *ray shooting*: the tie-broken maximizer of $c\cdot s$ over the remaining candidates is provably a vertex, joins $E$, and $p$ is retested. Total LP count is $\leq n+|E|$, all small, solved on one persistent warm-started HiGHS model (objective swap per test, one row appended per confirmed ray).
+always feasible and bounded. Value $0$ means $p\in\text{cone}(E)$ (Farkas) -- redundant,
+however incomplete $E$ is. A positive value instead proves $E$ is *missing* a ray, and the
+optimizer $c$ locates it by ray shooting: the tie-broken maximizer of $c\cdot s$ is provably
+a vertex, joins $E$, and $p$ is retested. Total LP count is $\leq n+|E|$, all small, on one
+persistent warm-started HiGHS model.
 
-Floating-point tie-breaking can rarely admit a redundant ray into $E$; a cleanup pass retests exactly the tie-admitted rays (unique maximizers are provably vertices and skip it), removing a ray only on a positive certificate of redundancy -- escalating to exact rational arithmetic for integer input. So cleanup never costs you a ray you had.
+Both oracles unit-normalize their inputs, so a fixed tolerance means the same thing for
+every candidate. Without that, slice coordinates under an anisotropic $w$ vary by orders of
+magnitude and rays get dropped below `tol`.
 
-The opposite direction -- a ray *missing* from the result -- is the failure mode to understand, because it is the one that breaks generation. A candidate is called redundant when its separation value falls below `tol`, and on badly conditioned cones a genuinely extremal ray can score just under it. Three things now guard that: any verdict landing between the solver's noise floor and `tol` is re-decided in exact rational arithmetic when the rays are integral; a run that could not do so (float rays) warns; and `verify` re-checks the whole answer, escalating borderline rays to exact arithmetic in both directions. What remains is a genuine limit rather than an oversight: for float input at extreme conditioning, no float LP can separate "inside the cone" from "$10^{-15}$ outside it", and there is no exact path to fall back on. Pass integer rays when you have them.
+**The failure mode to know about** is a ray *missing* from the result, since that breaks
+generation. Guards: near-tolerance verdicts are re-decided in exact rational arithmetic for
+integer rays; float input warns instead; `verify` re-checks both directions. What remains is
+a real limit -- no float LP separates "inside the cone" from "$10^{-15}$ outside" -- so pass
+integer rays when you have them.
 
-See the module docstrings in [`core.py`](src/extremal_rays/core.py) for details -- particularly `_SeparationOracle` and `_MembershipOracle`, which document the numerical failure modes that shaped them. I encourage you to read them.
+Details, including the numerical failures that shaped the design, are in the `_SeparationOracle`
+and `_MembershipOracle` docstrings in [`core.py`](src/extremal_rays/core.py).
 
 ## Benchmarks
 
-Toric Mori cone (in a basis) of the CY hypersurface with $h^{1,1}=491$: 3509 generating rays in 491 dimensions, 884 extremal.
+Against CYTools, lrs, cddlib and Normaliz on families built from the Kreuzer-Skarke
+polytopes. Every method's answer is checked against this package's before it is timed, and
+process start-up is subtracted from the external tools.
+
+![Toric Mori cone](docs/benchmark_prior_art.png)
+
+![Mori-cone cap](docs/benchmark_cap_scaling.png)
+
+Toric Mori cone of the $h^{1,1}=491$ CY -- 3509 rays in 491 dimensions, 884 extremal:
 
 | method | time |
 | --- | --- |
-| per-ray LP vs all others (CYTools `extremal_rays`, `method="lp"`) | does not terminate (> 15 min per extremal ray) |
-| per-ray NNLS (CYTools `method="nnls"`) | ~15 CPU-hours, verdicts at ~10x the tolerance |
-| this package (single-threaded, incl. cleanup) | **~20 s** |
-| full certificate audit (optional) | ~2 min |
+| this package | **~13 s** |
+| CYTools `extremal_rays` | does not finish |
+| full certificate audit (optional) | ~11 s on 8 workers |
 
-The largest job run to date: the Mori-cone *cap* of the same CY, 10,026,843 candidate rays in 491 dimensions (1,218 extremal), in **79.6 min end-to-end** with `n_workers=8`, sparse input, generation order kept (`sort_candidates=False`), and the slice functional supplied via `w=` (the cap's dual cone has a compact description; solving the pointedness LP over 10M rows instead fails).
-
-~94% of the runtime is HiGHS solve time (~3500 separation LPs at ~5 ms), so the Python layer is not the bottleneck. Results agree exactly with CYTools on Mori cones small enough for CYTools to finish ($h^{1,1}\in\\{10,25,50,100\\}$); the $h^{1,1}=491$ answer passes the full certificate audit and was cross-checked against NNLS on a sample.
+Largest run to date: the Mori-cone *cap* of the same CY, 10,026,843 rays in 491 dimensions
+(1,218 extremal), in 79.6 min with `n_workers=8` and the slice functional supplied via `w=`.
 
 ## Citation
 
@@ -96,7 +128,7 @@ If you use `extremal-rays` in your research, please cite it:
 @software{extremal_rays,
   author  = {MacFadden, Nate},
   title   = {extremal-rays},
-  url     = {https://github.com/LiamMcAllisterGroup/extremal_rays},
+  url     = {https://github.com/LiamMcAllisterGroup/extremalrays},
   orcid   = {0000-0002-8481-3724},
 }
 ```

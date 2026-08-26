@@ -6,6 +6,6 @@ authors:
   - family-names: MacFadden
     given-names: Nate
     orcid: https://orcid.org/0000-0002-8481-3724
-repository-code: https://github.com/LiamMcAllisterGroup/extremal_rays
+repository-code: https://github.com/LiamMcAllisterGroup/extremalrays
 license: GPL-3.0-or-later
 type: software
