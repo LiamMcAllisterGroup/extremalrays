@@ -1,7 +1,7 @@
 # extremalrays
 *[Nate MacFadden](https://github.com/natemacfadden), Liam McAllister Group, Cornell*
 
-Fast extremal rays of pointed polyhedral cones via [Clarkson's output-sensitive algorithm](https://doi.org/10.1109/SFCS.1994.365723). Alternative to a per-ray feasibility LP that should be quicker for hard cases.
+Fast extremal rays of pointed polyhedral cones via [Clarkson's output-sensitive algorithm](https://doi.org/10.1109/SFCS.1994.365723). An alternative to the per-ray feasibility LP; should be quicker on hard cases.
 
 ## Description
 
