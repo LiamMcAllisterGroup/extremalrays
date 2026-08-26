@@ -1,7 +1,7 @@
-# extremal-rays
+# extremalrays
 *[Nate MacFadden](https://github.com/natemacfadden), Liam McAllister Group, Cornell*
 
-Fast extremal rays of pointed polyhedral cones via [Clarkson's output-sensitive algorithm](https://doi.org/10.1109/SFCS.1994.365723). Built for cones that defeat the classical per-ray LP: many generators, high dimension, mostly-redundant rays, such as the toric Mori cones of Calabi-Yau hypersurfaces at large $h^{1,1}$. On the Mori cone of the $h^{1,1}=491$ CY (3509 generators in 491 dimensions, 884 extremal), `extremal-rays` finishes in ~13s single-threaded on an Apple M1 Pro (32 GB RAM, macOS 26) where the classical method does not terminate; reproduce with [`benchmarks/benchmark_h11_491.py`](benchmarks/benchmark_h11_491.py) (data bundled).
+Fast extremal rays of pointed polyhedral cones via [Clarkson's output-sensitive algorithm](https://doi.org/10.1109/SFCS.1994.365723). Alternative to a per-ray feasibility LP that should be quicker for hard cases.
 
 ## Description
 
@@ -11,13 +11,13 @@ $$ \mathcal{C} = \\{\textstyle\sum_i \lambda_i R_i : \lambda_i \geq 0\\}, $$
 
 `exhaustive` returns the indices of the unique minimal generating subset, i.e. the extremal rays. `sample` is a cheaper cousin that certifies a subset of them and makes no completeness claim. `verify` audits an answer from explicit certificates, checking each one rather than trusting a solver status code.
 
-The usual approach (CYTools' `Cone.extremal_rays`, and `redund` in cddlib or lrs) asks, for each ray, whether it is a non-negative combination of the other $n-1$. Redundant rays answer quickly. Extremal ones need an infeasibility proof for a big degenerate system, and that is where the time goes. `extremal-rays` never asks that question: a candidate is only ever tested against the small set of rays already confirmed extremal.
+The usual approach (CYTools v1.4.12's `Cone.extremal_rays`, and `redund` in cddlib or lrs) asks, for each ray, whether it is a non-negative combination of the other $n-1$. Redundant rays answer quickly. Extremal ones need an infeasibility proof for a big degenerate system, and that is where the time goes. `extremalrays` never asks that question: a candidate is only ever tested against the small set of rays already confirmed extremal.
 
 One caveat on `verify`. Its certificates are built independently of `exhaustive` (different formulation, opposite LP direction, exact arithmetic when the rays are integral), but the two share this package's preprocessing. A bug in the deduplication would be invisible to it.
 
 ### Prior art
 
-Removing redundant generators is a classical problem with good tools: the double description method of Motzkin et al., as implemented in Fukuda's [cddlib](https://people.inf.ethz.ch/fukuda/cdd_home/); reverse search in Avis's [lrslib](http://cgm.cs.mcgill.ca/~avis/C/lrs.html); plus [Normaliz](https://www.normaliz.uni-osnabrueck.de/) and [polymake](https://polymake.org/). Use those for most cones. This package is for the corner they handle badly, which is many generators in high dimension where most of them are redundant. The [benchmarks](#benchmarks) below show where the crossover happens.
+Removing redundant generators is a classical problem with good tools: the double description method of Motzkin et al., as implemented in Fukuda's [cddlib](https://people.inf.ethz.ch/fukuda/cdd_home/); reverse search in Avis's [lrslib](http://cgm.cs.mcgill.ca/~avis/C/lrs.html); plus [Normaliz](https://www.normaliz.uni-osnabrueck.de/) and [polymake](https://polymake.org/). See [benchmarks](#benchmarks) for how we compare. Our benchmarks are focused to our cases of interest (cones arising in CYTools/string theory).
 
 ## Limitations
 
@@ -53,7 +53,7 @@ ok, report = verify(R, idx)      # -> True, with the certificates checked
 some, curve = sample(R, work=200)   # cheap certified subset (no completeness)
 ```
 
-Rays usually arrive from a file or another library rather than a literal, and any `(n, d)` array-like works: `exhaustive(np.load("rays.npy"))`, or a `scipy.sparse` CSR matrix, which is kept sparse end to end.
+Rays can also arrive from a file or another library rather than a literal, and any `(n, d)` array-like works: `exhaustive(np.load("rays.npy"))`, or a `scipy.sparse` CSR matrix, which is kept sparse end to end.
 
 Integer input enables exact primitive-vector deduplication and an exact rational fallback in cleanup. Duplicate directions collapse to their first occurrence. A wall-time breakdown of the last call is stored in `extremal_rays.core.LAST_PROFILE`.
 
@@ -82,14 +82,14 @@ Compared against CYTools, lrs, cddlib and Normaliz on cone families built from t
 **Toric Mori cone**, $h^{1,1} = 3$ to $491$:
 
 <p align="center">
-  <img src="docs/benchmark_prior_art.png" alt="Runtime vs h11 for toric Mori cones: extremal-rays alone reaches h11=491"/>
+  <img src="docs/benchmark_prior_art.png" alt="Runtime vs h11 for toric Mori cones: extremalrays alone reaches h11=491"/>
 </p>
 
 **Mori-cone cap**, which is the same cone family capped, and much larger: 20,899 rays at
 $h^{1,1}=50$ against 333 for the cone itself. Plotted against ray count, since cap size is not monotonic in $h^{1,1}$:
 
 <p align="center">
-  <img src="docs/benchmark_cap_scaling.png" alt="Runtime vs cap size: extremal-rays and CYTools share an exponent, cddlib and lrs do not"/>
+  <img src="docs/benchmark_cap_scaling.png" alt="Runtime vs cap size: extremalrays and CYTools share an exponent, cddlib and lrs do not"/>
 </p>
 
 Against CYTools the exponents agree and the gap is a constant of roughly an order of magnitude. Against cddlib and lrs it is the exponent that differs ($n^{2.6}$ and $n^{3.6}$ against $n^{1.34}$), which is why they stop around 1,500 rays.
@@ -106,12 +106,12 @@ The largest run so far is the cap of that same CY: 10,026,843 rays in 491 dimens
 
 ## Citation
 
-If you use `extremal-rays` in your research, please cite it:
+If you use `extremalrays` in your research, please cite it:
 
 ```bibtex
 @software{extremal_rays,
   author  = {MacFadden, Nate},
-  title   = {extremal-rays},
+  title   = {extremalrays},
   url     = {https://github.com/LiamMcAllisterGroup/extremalrays},
   orcid   = {0000-0002-8481-3724},
 }
