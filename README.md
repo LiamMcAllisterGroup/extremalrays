@@ -71,6 +71,14 @@ $$ \text{find } w\in\mathbb{R}^d \quad \text{s.t.} \quad w\cdot r_i \geq 1 \ \ \
 
 solvable exactly when $\mathcal{C}$ is pointed. Its solution fixes the slice $w\cdot x=1$, and $r_i\leftarrow r_i/(w\cdot r_i)$ lands every ray on it, so $r_i$ is extremal in $\mathcal{C}$ exactly when it is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$.
 
+Rescaling is what makes the ray-shooting step below valid.
+
+**Lemma.** If $c\cdot r_j$ attains its maximum over $j$ at a unique $j^\*$, then $r_{j^\*}$ is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$, hence extremal.
+
+*Proof.* If $r_{j^\*}=\sum_k \lambda_k r_k$ with $\lambda_k\geq 0$ and $\sum_k \lambda_k=1$, then $c\cdot r_{j^\*}=\sum_k \lambda_k (c\cdot r_k)\leq\max_k c\cdot r_k=c\cdot r_{j^\*}$. Equality forces $c\cdot r_k=c\cdot r_{j^\*}$ whenever $\lambda_k\gt 0$, and uniqueness then forces $k=j^\*$, so $r_{j^\*}$ is not a convex combination of the others. $\square$
+
+The hypothesis fails before rescaling, where $c\cdot r_j$ ranks lengths rather than directions. Take $r_1=(1,0)$, $r_2=(0,1)$ and $r_3=(t,t)$, so that $r_3 = t r_1 + t r_2$ is redundant, and shoot with $c=(1,\alpha)$ for $\alpha\in(0,1)$: the values are $1$, $\alpha$ and $t(1+\alpha)$, so the redundant $r_3$ is the unique maximizer whenever $t\gt 1/(1+\alpha)$. Rescaling sends $r_3$ to $(\tfrac12,\tfrac12)=\tfrac12 r_1+\tfrac12 r_2$ for every $t$, which by the equality case above can never be a unique maximizer.
+
 Let $E$ be the rays confirmed extremal so far, which starts empty and only grows. A candidate $p$ is tested against it by searching for a linear functional $c\in\mathbb{R}^d$ that separates $p$ from $\mathrm{cone}(E)$:
 
 $$ \max_{c\in\mathbb{R}^d}\ c\cdot p \quad \text{s.t.} \quad c\cdot e \leq 0\ \ \forall e\in E, \quad -1\leq c_i\leq 1, $$
