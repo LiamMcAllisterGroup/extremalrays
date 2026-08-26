@@ -63,13 +63,13 @@ Candidate *order* matters for speed. The separation oracle warm-starts between c
 
 ## Algorithm Notes
 
-The first step is to check that $\mathcal{C}$ is pointed and to rescale the rays. Pointedness is required because a cone containing a line has no well-defined extremal rays. Rescaling changes no verdict, since extremality is scale-free; it is what turns the conic question into a polytope one, and what lets a single `tol` mean the same thing for every ray.
+The first step is to check that $\mathcal{C}$ is pointed and to rescale the rays. Pointedness is desired because a cone containing a linear subspace (i.e., a 'lineality space') has less-clear extremal rays. Rescaling is desired because it changes no verdict, it converts conic question into a polytope one, and it lets a single `tol` mean the same thing for every ray.
 
 Write $r_1,\dots,r_n\in\mathbb{R}^d$ for the rows of $R$. Both jobs fall out of one feasibility LP,
 
 $$ \text{find } w\in\mathbb{R}^d \quad \text{s.t.} \quad w\cdot r_i \geq 1 \ \ \forall i, $$
 
-solvable exactly when $\mathcal{C}$ is pointed. Its solution fixes the slice $w\cdot x=1$, and $r_i\mapsto r_i/(w\cdot r_i)$ lands every ray on it, so $r_i$ is extremal in $\mathcal{C}$ exactly when it is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$. The oracles then unit-normalize each vector on entry, a separate rescaling that equalizes `tol`: on the $h^{1,1}=491$ cone an extremal ray of slice norm $10^{-4}$ separated by $8\times10^{-8}$ without it, under `tol` and silently dropped, against $7\times10^{-4}$ with it.
+solvable exactly when $\mathcal{C}$ is pointed. Its solution fixes the slice $w\cdot x=1$, and $r_i\leftarrow r_i/(w\cdot r_i)$ lands every ray on it, so $r_i$ is extremal in $\mathcal{C}$ exactly when it is a vertex of $\mathrm{conv}\\{r_1,\dots,r_n\\}$.
 
 Let $E$ be the rays confirmed extremal so far, which starts empty and only grows. A candidate $p$ is tested against it by searching for a linear functional $c\in\mathbb{R}^d$ that separates $p$ from $\mathrm{cone}(E)$:
 
