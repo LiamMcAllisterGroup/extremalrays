@@ -13,7 +13,7 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Extremal rays of toric Mori cones, this package against the
+# Description:  Extremal rays of torically inherited Mori cones, this package
 #               prior art, over a family of Calabi-Yau hypersurfaces at
 #               increasing h11. Every method solves the SAME problem (given
 #               generators of a pointed cone, return the minimal generating

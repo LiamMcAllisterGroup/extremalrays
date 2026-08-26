@@ -85,22 +85,21 @@ By using rational arithmetic, floating point errors are avoided and definitive r
 
 Compared against CYTools, lrs, cddlib and Normaliz on cone families built from the Kreuzer-Skarke polytopes, on an Apple M1 Pro (32 GB RAM, macOS 26). Each method gets all 10 cores, though several stay serial by design. Every method's answer is checked against this package's before it is timed, so a fast wrong answer cannot win, and the fork cost of the command-line tools is measured and subtracted. Points are medians over three polytopes per $h^{1,1}$; error bars are the spread between them. Recreate with the [`benchmarks/`](benchmarks) scripts.
 
-**Toric Mori cone**, $h^{1,1} = 3$ to $491$:
+**Torically inherited Mori cone**, $h^{1,1} = 3$ to $491$:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_prior_art.png" alt="Runtime vs h11 for toric Mori cones: extremalrays alone reaches h11=491"/>
+  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_prior_art.png" alt="Runtime vs h11 for torically inherited Mori cones: extremalrays alone reaches h11=491"/>
 </p>
 
-**Mori-cone cap**, which is the same cone family capped, and much larger: 20,899 rays at
-$h^{1,1}=50$ against 333 for the cone itself. Plotted against ray count, since cap size is not monotonic in $h^{1,1}$:
+**Mcap**, the intersection of the torically inherited Mori cones from all '2-face equivalent' CYs, and much larger: 20,899 rays at $h^{1,1}=50$ against 333 for the cone itself. Plotted against ray count, since Mcap size is not monotonic in $h^{1,1}$:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_cap_scaling.png" alt="Runtime vs cap size: extremalrays and CYTools share an exponent, cddlib and lrs do not"/>
+  <img src="https://raw.githubusercontent.com/LiamMcAllisterGroup/extremalrays/main/docs/benchmark_cap_scaling.png" alt="Runtime vs Mcap size: extremalrays and CYTools share an exponent, cddlib and lrs do not"/>
 </p>
 
 Against CYTools the exponents agree and the gap is a constant of roughly an order of magnitude. Against cddlib and lrs it is the exponent that differs ($n^{2.6}$ and $n^{3.6}$ against $n^{1.34}$), which is why they stop around 1,500 rays.
 
-On the $h^{1,1}=491$ Mori cone itself (3509 rays in 491 dimensions, 884 extremal):
+On the $h^{1,1}=491$ torically inherited Mori cone itself (3509 rays in 491 dimensions, 884 extremal):
 
 | method | time |
 | --- | --- |
@@ -108,7 +107,7 @@ On the $h^{1,1}=491$ Mori cone itself (3509 rays in 491 dimensions, 884 extremal
 | CYTools v1.4.12 `extremal_rays` | does not finish |
 | full certificate audit (optional) | ~11 s on 8 workers |
 
-The largest run so far is the cap of that same CY: 10,026,843 rays in 491 dimensions, 1,218 extremal, in 79.6 min with `n_workers=8` and the slice functional handed in via `w=`.
+The largest run so far is the Mcap of that same CY: 10,026,843 rays in 491 dimensions, 1,218 extremal, in 79.6 min with `n_workers=8` and the slice functional handed in via `w=`.
 
 ## Citation
 
@@ -139,14 +138,14 @@ extremalrays/
 │   ├── test_verify.py              # accepts right answers, rejects wrong ones, parallel audit
 │   ├── test_internals.py           # unit tests of the oracles, dedup, exact arithmetic
 │   ├── test_readme_examples.py     # the README snippet runs as documented
-│   └── data/                       # Mori-cone caps with CYTools-produced extremal sets (regression fixtures)
+│   └── data/                       # Mcaps with CYTools-produced extremal sets (regression fixtures)
 ├── benchmarks/                     # perf benchmarks; double as usage examples + make the README figures
 │   ├── benchmark_h11_491.py        # the flagship cone: repeats, dispersion, machine capture, opt-in classical baseline
 │   ├── benchmark_mori_cone.py      # runtime vs h11 against CYTools, lrs, cddlib, Normaliz
-│   ├── benchmark_mcap.py           # the same against the Mori-cone cap, vs h11 and vs problem size
+│   ├── benchmark_mcap.py           # the same against the Mcap, vs h11 and vs problem size
 │   ├── benchmark_parallel.py       # where parallelism pays: the sweep vs the audit
-│   ├── make_cones.py               # build the Mori-cone family from the Kreuzer-Skarke polytopes
-│   ├── make_caps.py                # build the Mori-cone cap family (needs the mori-cap tooling)
+│   ├── make_cones.py               # build the Mori cone family from the Kreuzer-Skarke polytopes
+│   ├── make_caps.py                # build the Mcap family (needs the mcap tooling)
 │   ├── _bench.py                   # shared timing helper: warmup, repeats, median with spread
 │   ├── _plot.py                    # the runtime-vs-h11 figure, with fitted power laws
 │   ├── _plot_scaling.py            # the runtime-vs-ray-count figure

@@ -58,7 +58,7 @@ rays are returned is a minor bump at minimum, and says so here.
   changes between candidates, which leaves the basis primal feasible, so the
   default dual simplex was re-establishing dual feasibility every solve.
   Measured 22.2 s -> 13.0 s on the `h11=491` Mori cone (1.7x) with a
-  byte-identical index set, and 1.22x on the 10M-ray Mori-cone cap.
+  byte-identical index set, and 1.22x on the 10M-ray Mcap.
 - Membership LPs (`verify`, and the cleanup pass) reuse one persistent model
   instead of rebuilding it per candidate: 24.8 -> 15.7 ms per LP. The basis is
   deliberately not carried over -- see `_MembershipOracle` for why a

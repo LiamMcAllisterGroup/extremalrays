@@ -65,7 +65,8 @@ def polytope_table(vertex_counts=VERTEX_FILES):
 
 def mori_rays(vertices):
     """
-    Toric Mori cone rays (in a basis) of the CY from this polytope.
+    Torically inherited Mori cone rays (in a basis) of the CY from this
+    polytope.
 
     The CY lives in a triangulation of the DUAL polytope, and only favorable
     ones are used; non-favorable cases need CYTools' experimental features

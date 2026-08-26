@@ -200,7 +200,7 @@ def verify(R: ArrayLike,
     w : array-like | None, optional
         A functional positive on every ray, used for the slice exactly as
         in ``exhaustive``. Supply the same ``w`` when re-solving the
-        pointedness LP is impractical; on the 10M-ray Mori-cone cap that
+        pointedness LP is impractical; on the 10M-ray Mcap that
         LP is what makes the audit hard to start at all. Defaults to None,
         which solves the LP.
     n_workers : int, optional

@@ -16,7 +16,7 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Build the Mori-cone CAP for a range of h11 and save the rays.
+# Description:  Build the Mcap for a range of h11 and save the rays.
 #               The cap is far larger than the cone it caps: 20,899 rays at
 #               h11=50 against 333 for the cone, and 10,026,843 at h11=491 --
 #               which is what makes it the interesting benchmark family.
@@ -47,7 +47,7 @@ SENTINEL = 2 ** 31          # padding label in the encoded circuit rows
 
 
 def cap_rays(vertices):
-    """Dense ray matrix of the Mori-cone cap of the CY from this polytope."""
+    """Dense ray matrix of the Mcap of the CY from this polytope."""
     from cytools import Polytope                    # before highspy: see below
     from extremality_probe import _cap_data
     from mori_cap_rework import (_encode_circuits, _origin_circuits,

@@ -368,7 +368,7 @@ DATA = os.path.join(os.path.dirname(__file__), "data",
 
 @pytest.mark.parametrize("h11", [15, 20, 25])
 def test_mori_cap_matches_cytools(h11):
-    # Mori-cone caps: bundled ray matrices with the extremal sets a real
+    # Mcaps: bundled ray matrices with the extremal sets a real
     # CYTools run produced (16/16 agreement across h11 = 5..25 when
     # frozen); the vendored reference must reproduce the stored answer,
     # and exhaustive must match both

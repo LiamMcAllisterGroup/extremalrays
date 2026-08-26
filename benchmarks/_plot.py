@@ -15,7 +15,7 @@
 # -----------------------------------------------------------------------------
 # Description:  Plot the prior-art comparison written by
 #               benchmark_prior_art.py: time to compute the extremal rays of
-#               the toric Mori cone against h11, one series per method, log
+#               the torically inherited Mori cone against h11, one series
 #               scale. A method that stops appearing hit the time limit or
 #               failed; that point is marked rather than silently dropped.
 #
@@ -120,7 +120,9 @@ def main():
     ap.add_argument("--from-log", metavar="PATH",
                     help="read a running benchmark's log instead of its JSON")
     ap.add_argument("--out", default=str(DOCS / "benchmark_prior_art.png"))
-    ap.add_argument("--title", default="Extremal rays of the toric Mori cone")
+    ap.add_argument("--title",
+                    default="Extremal rays of the torically inherited "
+                            "Mori cone")
     ap.add_argument("--samples", type=int, default=3,
                     help="polytopes sampled per h11 (h21 is not controlled)")
     ap.add_argument("--watch", type=float, metavar="SECONDS",
