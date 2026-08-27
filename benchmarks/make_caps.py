@@ -51,9 +51,9 @@ SENTINEL = 2 ** 31          # padding label in the encoded circuit rows
 def cap_rays(vertices):
     """Dense ray matrix of the Mcap of the CY from this polytope."""
     from cytools import Polytope                    # before highspy: see below
-    from extremality_probe import _cap_data
-    from mori_cap_rework import (_encode_circuits, _origin_circuits,
-                                 _two_face_circuits, _unique_rows)
+    from mori_cap_rework import (_cap_data, _encode_circuits,
+                                 _origin_circuits, _two_face_circuits,
+                                 _unique_rows)
 
     p = Polytope([list(map(int, v)) for v in vertices]).dual()
     if not p.is_favorable(lattice="N"):
