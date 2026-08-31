@@ -76,6 +76,13 @@ _CG_ROUNDS = 60          # rounds before giving up (suggest w=)
 
 _CLEANUP_LP_TIME_LIMIT = 60.0  # seconds per membership-certificate LP
 
+# cap on the dense seeding product, so a large candidate set cannot turn the
+# batched shot GEMM into a multi-gigabyte allocation
+_SEED_GEMM_BYTES = 512 * 2**20
+
+# tie tolerance for ray shooting; seeding reproduces _shoot's rule directly
+_SHOOT_REL_TOL = 1e-9
+
 # HiGHS options for the separation oracle. Only the objective changes between
 # candidate tests, which leaves the incumbent basis PRIMAL feasible and dual
 # infeasible, so primal simplex (strategy 4) resumes from it directly, while
@@ -627,6 +634,28 @@ class _MembershipOracle:
 # ray shooting
 # -----------------------------------------------------------------------------
 
+def _lex_break(P, T: np.ndarray, rel_tol: float = 1e-9) -> "tuple[int, bool]":
+    """
+    Reduce a tied maximizer set to one index, lexicographically.
+
+    ``T`` holds the rows within tolerance of the maximum of some functional.
+    Returns ``(index, tied)`` with tied False when T was already a singleton,
+    in which case the maximizer is unique and needs no cleanup retest.
+    """
+    tied = len(T) > 1
+    if tied:
+        PT = _rows(P, T)
+        k = 0
+        d = P.shape[1]
+        while len(T) > 1 and k < d:
+            col = PT[:, k]
+            atol_k = rel_tol * max(1.0, float(np.abs(col).max()))
+            keep = col >= col.max() - atol_k
+            T, PT = T[keep], PT[keep]
+            k += 1
+    return int(T[0]), tied
+
+
 def _shoot(P,
            c: np.ndarray,
            cand: np.ndarray,
@@ -657,18 +686,7 @@ def _shoot(P,
         vals = (P @ c)[cand]  # full matvec: no candidate-submatrix copy
     atol = rel_tol * max(1.0, float(np.abs(vals).max()))
     T = cand[vals >= vals.max() - atol]
-    tied = len(T) > 1
-    if tied:
-        PT = _rows(P, T)
-        k = 0
-        d = P.shape[1]
-        while len(T) > 1 and k < d:
-            col = PT[:, k]
-            atol_k = rel_tol * max(1.0, float(np.abs(col).max()))
-            keep = col >= col.max() - atol_k
-            T, PT = T[keep], PT[keep]
-            k += 1
-    return int(T[0]), tied
+    return _lex_break(P, T, rel_tol)
 
 
 # -----------------------------------------------------------------------------
@@ -1130,14 +1148,37 @@ def exhaustive(R: ArrayLike,
     if seed_shots and not resumed:
         rng = np.random.default_rng(rng_seed)
         C = rng.standard_normal((d, seed_shots))
-        # every shot in one matmul: 982 separate matvecs measured 437 ms on
-        # the h11=491 cone against 10 ms for the single GEMM (45x), and the
-        # argmaxes are identical
-        V = np.asarray(P @ C)
-        all_idx = np.arange(n)
         hits = {}  # index -> tied on every shot that produced it
+        # every shot in one matmul is the fastest arithmetic but the product
+        # is n x seed_shots doubles, which is 80 GB on the h11=491 cap.
+        # Chunk over rows rather than shots: the full shot width is kept, so
+        # P streams once per chunk instead of once per shot block (39 s
+        # against 167 s for column blocks at 10M rows)
+        chunk = max(1, int(_SEED_GEMM_BYTES // (8 * max(seed_shots, 1))))
+
+        # pass 1: each shot's maximum, and the scale setting its tolerance
+        best = np.full(seed_shots, -np.inf)
+        scale = np.zeros(seed_shots)
+        for r0 in range(0, n, chunk):
+            V = np.asarray(P[r0:r0 + chunk] @ C)
+            np.maximum(best, V.max(axis=0), out=best)
+            np.maximum(scale, np.abs(V).max(axis=0), out=scale)
+            del V
+        atol = _SHOOT_REL_TOL * np.maximum(1.0, scale)
+
+        # pass 2: the rows within tolerance of each shot's maximum. Ties are
+        # rare, so these lists stay short
+        tied_rows = [[] for _ in range(seed_shots)]
+        for r0 in range(0, n, chunk):
+            V = np.asarray(P[r0:r0 + chunk] @ C)
+            rows, shots = np.nonzero(V >= best - atol)
+            for r, k in zip(rows.tolist(), shots.tolist()):
+                tied_rows[k].append(r0 + r)
+            del V
+
         for k in range(seed_shots):
-            j, tied = _shoot(P, C[:, k], all_idx, all_vals=V[:, k])
+            j, tied = _lex_break(P, np.asarray(tied_rows[k], dtype=np.int64),
+                                 _SHOOT_REL_TOL)
             hits[j] = hits.get(j, True) and tied
         for j in sorted(hits):
             if status[j] == 0:  # may already be in E via `known`
