@@ -33,6 +33,7 @@ import pytest
 from scipy.sparse import csr_matrix
 
 # local imports
+import extremalrays
 from extremalrays import core
 from extremalrays.core import (_as_integer, _exact_membership, _fingerprint,
                                 _first_unique, _padded_key, _reduce, _shoot,
@@ -344,3 +345,14 @@ def test_constraint_generation_handles_wide_cones(monkeypatch):
     from extremalrays import sample
     idx, _ = sample(R, work=200)
     assert set(idx.tolist()) <= set(core.exhaustive(R).tolist())
+
+def test_known_seeds_are_verified_not_trusted():
+    # regression: known= admitted seeds with suspect=False, and cleanup only
+    # retests suspects, so a caller's rough first pass could put a
+    # non-extremal ray into the output labelled extremal. Ray 1 here is
+    # 2*ray0 + 2*ray3, so it must be pruned however it entered E
+    P = np.array([[1, 0], [0, 1], [0.5, 0.5], [-1, 0.5]], dtype=float)
+    truth = sorted(int(x) for x in extremalrays.exhaustive(P))
+    assert truth == [0, 3]
+    seeded = sorted(int(x) for x in extremalrays.exhaustive(P, known=[0, 1, 3]))
+    assert seeded == truth

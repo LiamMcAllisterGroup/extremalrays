@@ -1137,7 +1137,10 @@ def exhaustive(R: ArrayLike,
                 raise ValueError(f"known index {int(k)} is not a "
                                  "representative row (duplicate or zero?)")
             if status[j] == 0:
-                confirm(j, False)
+                # admitted as a suspect: a caller's rough first pass may
+                # over-collect, and cleanup is what makes that safe. One
+                # membership LP per seed against a sweep of millions
+                confirm(j, True)
         if verbosity >= 1:
             print(f"known: {len(E)} extremal rays preloaded")
 
