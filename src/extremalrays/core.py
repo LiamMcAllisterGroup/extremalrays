@@ -930,7 +930,7 @@ def exhaustive(R: ArrayLike,
                rng_seed: int = 0,
                n_workers: int = 0,
                checkpoint: "str | None" = None,
-               sort_candidates: bool = False,
+               sort_candidates: bool = True,
                known: "ArrayLike | None" = None,
                w: "ArrayLike | None" = None) -> np.ndarray:
     """
@@ -999,13 +999,13 @@ def exhaustive(R: ArrayLike,
         lost on a crash). Defaults to None.
     sort_candidates : bool, optional
         Process candidates in lexicographic ray order rather than input
-        order. Candidate order sets the oracle's warm-start quality.
-        Locality-ordered input (e.g. generated group-by-group, the
-        common case) beats the lexsort by ~18% on the h11=491 benchmark
-        cone, 13.8 s against 16.3 s. Shuffling that input costs
-        ~1.5-1.8x (21-25 s), which the lexsort recovers (13.7 s). Pass
-        True unless the input order is known to be structured. The
-        returned indices are unaffected. Defaults to False.
+        order. Candidate order sets the oracle's warm-start quality, and
+        the lexsort is at worst neutral: 13.97 s against 13.98 s on the
+        h11=491 Mori cone, 6% and 11% faster on the h11=75 and 90 caps,
+        and 26% faster on the 10M-ray h11=491 cap. Shuffled input costs
+        1.5-1.65x, which the lexsort recovers in full. Sorting removes
+        the caller's row order as a performance variable, so it is the
+        default. The returned indices are unaffected. Defaults to True.
     known : array-like of int | None, optional
         Indices into R of rays already certified extremal, preloaded into
         the confirmed set. Almost always None: certified rays are rarely

@@ -64,7 +64,7 @@ Integer input enables exact primitive-vector deduplication and an exact rational
 
 For long jobs, `n_workers=8` sweeps candidates in parallel against frozen snapshots of the confirmed set (verdicts stay exact; rare separation failures are re-resolved serially), and `checkpoint="state.npz"` saves state atomically every minute. Rerunning the same call resumes from the last checkpoint, guarded by a fingerprint of the input rays.
 
-Candidate *order* matters for speed. The separation oracle warm-starts between consecutive LPs, so an order that keeps similar rays adjacent runs faster. On the benchmark cone, generation order takes 13.8 s and a shuffle of it takes 21 to 25 s. Structured order is the common case, so it is the default; for unstructured input, `sort_candidates=True` lexsorts internally and gets the shuffle back to 13.7 s.
+Candidate *order* matters for speed. The separation oracle warm-starts between consecutive LPs, so an order that keeps similar rays adjacent runs faster, and a shuffle costs 1.5 to 1.65x. `sort_candidates` lexsorts internally and is the default, because it is never slower than the input order in our measurements and often faster: neutral on the benchmark cone (13.97 s against 13.98 s), 6% and 11% quicker on the $h^{1,1}=75$ and $90$ caps, and 26% quicker on the 10M-ray cap. Pass `sort_candidates=False` to keep the input order.
 
 ## Algorithm Notes
 
